@@ -1,0 +1,134 @@
+---
+title: "Anchorages in Channel Islands"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(janitor)
+library(sf)
+library(bigrquery)
+library(tigris)
+library(kableExtra)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Load CI shp 
+ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# Load US counties shp 
+us_counties <- tigris::counties()
+
+## Central CA counties 
+ca_counties <- us_counties %>% 
+  filter(GEOID %in% c('06083', '06111', '06037'))
+```
+
+Check for any GFW anchorages near the Channel Islands, this may represent dive sites.
+
+```{r query-anchorages}
+sql_anchorages <- "#StandardSQL
+
+  SELECT 
+    *
+  FROM 
+    `world-fishing-827.anchorages.named_anchorages_v20211026` 
+  WHERE (lon >= -121 AND lon <= -118)
+  AND (lat >= 32.5 AND lat <= 34.5)"
+
+anchorages <- bq_project_query("emlab-gcp",
+                               sql_anchorages) %>% 
+  bq_table_download(n_max = Inf)
+```
+
+Plot the results of the anchorages query over the central California counties and channel islands boundaries. It is likely that there will be anchorages for ports in Santa Barbara, Ventura, and LA included in these initial results. 
+```{r map-anchorages}
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = anchorages, aes(x=lon, y=lat, color = label), alpha = 0.6)
+```
+
+The map shows some overlap of anchorages in ports along the coast but there are also some that are associated with the islands. We need to narrow down these results for just the anchorages being shown near the islands. It looks like the following are labels of interest: Anacapa Isl, Avalon, AZ A, BF, Btai, Catalina Is, Isthmus Cove, Prisoners, San Diego, San Miguel Is, Santa Barbara Island, Santa Catalina Is, Santa Cruz Island, Santa Rosa Is, SantaBarbara, Scorpion Anch, Whites Cove Catalina, and Wilson Cove 
+
+```{r}
+island_anchorages <- anchorages %>% 
+  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
+                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
+                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
+                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
+                      'WILSON COVE')) %>% 
+  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
+  filter(s2id != '80e8f09d' & s2id != '80eea361')
+
+# Check on map 
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = island_anchorages, aes(x=lon, y=lat, color = label), alpha = 0.6) # Good 
+
+
+# Clean up anchorages dataset 
+island_anchorages_clean <- island_anchorages %>% 
+  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
+  mutate(label = ifelse(s2id == '80e8fa5b' | s2id == '80e8fa45', 'SANTA CRUZ ISLAND', label)) %>% 
+  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
+                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
+                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
+                                      label == 'ANACAPA ISL' ~ "Anacapa",
+                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
+                                      label == 'AVALON' | label == 'CATALINA IS' | 
+                                        label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
+                                        label == 'ISTHMUS COVE' ~ "Catalina",
+                                      TRUE ~ 'Santa Cruz')) %>% 
+  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
+                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
+                unique_active_ssvid, unique_total_ssvid)
+
+# Summarize anchorages by island 
+anch_by_island <- island_anchorages_clean %>% 
+  group_by(anchorage_island) %>% 
+  summarize(n_anchorages_gfw = n()) %>% 
+  adorn_totals('row')
+
+kable(anch_by_island,
+      col.names = c("Island", "Number of Anchorages"),
+      caption = "Number of anchorages found in GFW by island.") %>% 
+  kable_classic_2()
+```
+
+```{r map-by-island}
+# Check on map 
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = island_anchorages_clean, aes(x=lon, y=lat, color = anchorage_island), alpha = 0.6) +
+  labs(x = "",
+       y = "",
+       color = 'Island') + 
+  theme_bw() # Good 
+```
+Main ports by Island: 
+
+ - San Miguel: Cuyler Harbor  
+ - Santa Rosa: Bechers Bay  
+ - Santa Cruz: Prisoners Harbor and Scorpion  
+ - Anacapa: East End Landing Cove  
+ - Santa Barbara: Landing Cove  
+ - Catalina: Two Harbors and Avalon  
+ - San Clemente: Wilson Cove and Pyramid Cove  
+ 
+```{r save, include=F}
+write_csv(island_anchorages_clean, file.path(project_data_path, "processed", "initial_island_anchorages.csv"))
+```
+
