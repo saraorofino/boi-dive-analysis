@@ -1,0 +1,171 @@
+---
+title: "Spatial setup"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(tigris)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Load shp 
+ci_shp <- st_read(file.path(project_data_path, "raw", "data_EPSG_4326", "california_islands.shp"))
+
+# Load US counties shp 
+us_counties <- tigris::counties()
+
+## Central CA counties 
+ca_counties <- us_counties %>% 
+  filter(GEOID %in% c('06083', '06111', '06037'))
+
+## MPA Atlas 
+mpa_atlas <- st_read(file.path(emlab_data_dir, "mpa-atlas", "mpatlas_20201223_clean", "mpatlas_20201223_clean.shp"))
+```
+
+## Channel Islands 
+
+Setup spatial files for the project. The shapefile for the Channel Islands was created by California Department of Fish and Wildlife and was downloaded from [Stanford's Digital Repository](https://purl.stanford.edu/nd958xt7750).  
+
+```{r}
+# Convert the linestring to multilinestring
+ci_multiline <- st_cast(ci_shp, "MULTILINESTRING")
+
+# Buffer it by 0 to turn linestrings into polygons 
+ci_buffer <- st_buffer(ci_multiline, dist = 0)
+
+# Add names to the polygons (based on county id)
+ci_polys <- ci_buffer %>% 
+  mutate(poly_num = case_when(COUNTY_ID == 520 ~ 1,
+                              COUNTY_ID == 530 ~ 2,
+                              COUNTY_ID == 519 ~ 3,
+                              COUNTY_ID == 527 | COUNTY_ID == 528 ~ 4,
+                              COUNTY_ID == 556 | COUNTY_ID == 557 ~ 5,
+                              COUNTY_ID == 570 ~ 6,
+                              COUNTY_ID == 559 ~ 7,
+                              COUNTY_ID == 576 ~ 8,
+                              TRUE ~ 9),
+         poly_id = case_when(COUNTY_ID == 520 ~ 'San Miguel',
+                             COUNTY_ID == 530 ~ 'Santa Rosa',
+                             COUNTY_ID == 519 ~ 'Santa Cruz',
+                             COUNTY_ID == 527 | COUNTY_ID == 528 ~ 'Anacapa',
+                             COUNTY_ID == 556 | COUNTY_ID == 557 ~ 'Santa Barbara',
+                             COUNTY_ID == 570 ~ 'San Nicolas',
+                             COUNTY_ID == 559 ~ 'Catalina',
+                             COUNTY_ID == 576 ~ 'San Clemente',
+                             TRUE ~ 'Farallons')) %>% 
+  filter(poly_id != 'Farallons') %>% 
+  group_by(poly_num, poly_id) %>% 
+  summarize(geometry = st_union(geometry))
+
+# Validate polygons 
+ci_polys_valid <- st_make_valid(ci_polys)
+ci_polys_valid <- st_as_sf(ci_polys_valid)
+
+# Bounding box 
+ci_bbox <- st_bbox(ci_polys_valid) #xmin -121, xmax = -118; ymin = 32.5, ymax=34.5
+
+# Graph to check - looks pretty good 
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_polys_valid, aes(color = poly_id), fill=NA) + 
+  theme_classic()
+```
+
+```{r save}
+# Save the islands shapefile to project folder
+st_write(ci_polys_valid, file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# Convert geometry to wkt
+ci_bq <- ci_polys_valid %>% 
+  mutate(boundary = st_as_text(geometry)) %>% 
+  st_set_geometry(NULL)
+
+# Upload to BigQuery
+library(bigrquery)
+
+bq_table(project = "emlab-gcp", table = "channel_islands_boundaries", dataset = "boi_dive_project") %>%
+  bq_table_upload(values = ci_bq, fields = ci_bq)
+```
+
+## MPAs
+
+```{r}
+# Channel Islands MPAs
+ci_mpas <- mpa_atlas %>% 
+  filter(country == 'USA' & 
+           name %in% c('Channel Islands', 
+                       'Anacapa Island',
+                       'Footprint',
+                       'Footprint (Anacapa Channel)',
+                       'Scorpion',
+                       'Scorpion (Santa Cruz Island)',
+                       'Gull Island',
+                       'Gull Island (Santa Cruz Island)',
+                       'Carrington Point (Santa Rosa Island)',
+                       'Skunk Point (Santa Rosa Island)',
+                       'South Point',
+                       'South Point (Santa Rosa Island)',
+                       'Richardson Rock',
+                       'Richardson Rock (San Miguel Island)',
+                       'Judith Rock (San Miguel Island)',
+                       'Harris Point',
+                       'Harris Point (San Miguel Island)',
+                       'Begg Rock (San Nicolas Island)',
+                       'Arrow Point to Lion Head Point (Catalina Island)',
+                       'Blue Cavern (Catalina Island) Offshore',
+                       'Blue Cavern (Catalina Island) Onshore',
+                       'Casino Point (Catalina Island)',
+                       'Cat Harbor (Catalina Island)',
+                       'Farnsworth Offshore (Catalina Island)',
+                       'Farnsworth Onshore (Catalina Island)',
+                       "Lover's Cove (Catalina Island)",
+                       'Long Point (Catalina Island)',
+                       'Santa Barbara Island')) %>% 
+  dplyr::mutate(protection = ifelse(name %in% c('Channel Islands', 'Farnsworth Onshore (Catalina Island)',
+                                                      'Farnsworth Offshore (Catalina Island)',
+                                                      'Cat Harbor (Catalina Island)',
+                                                      'Arrow Point to Lion Head Point (Catalina Island)',
+                                                      "Lover's Cove (Catalina Island)",
+                                                      'Blue Cavern (Catalina Island) Offshore'), 
+                                          'Less Protected/Unknown',
+                                          'Fully/Highly Protected')) %>% 
+  dplyr::select(mpa_id, name, mpa_type = designatio, status, status_yr = status_yea, 
+                no_take, protection, fishing, area_km2 = calc_m_are)
+
+# CI polygons
+ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# Plot to check 
+ci_less <- ci_mpas %>% 
+  filter(protection == 'Less Protected/Unknown')
+
+ci_high <- ci_mpas %>% 
+  filter(protection == 'Fully/Highly Protected')
+
+ggplot() + 
+  geom_sf(data = ci_polys, fill = NA, color = 'black') + 
+  geom_sf(data = ci_less, aes(fill = protection), alpha = 0.4) + 
+  geom_sf(data = ci_high, aes(fill = protection), alpha = 0.6) + 
+  scale_fill_manual(breaks = c('Fully/Highly Protected', 'Less Protected/Unknown'),
+                    values = c('midnightblue', 'forestgreen')) + 
+  theme_bw()
+```
+```{r save-mpas}
+# Save the mpa shapefile to project folder
+st_write(ci_mpas, file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+```
+
+
+
