@@ -10,3 +10,7 @@ project_data_path <- file.path(project_path,"data")
 project_table_path <- file.path(project_path, "tables")
 # Path to project's output figure folder
 project_figure_path <- file.path(project_path, "figures")
+
+# Path to emLab data drive 
+emlab_data_dir <- file.path(ifelse(Sys.info()["sysname"]=="Windows", "G:/My Drive/",ifelse(Sys.info()["sysname"]=="Linux", "/home/jason/Documents/Gdrive_sync/emlab_shared/", "~/Google Drive/Shared drives/")),
+                            "emlab", "data")
