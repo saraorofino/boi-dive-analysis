@@ -1,0 +1,242 @@
+---
+title: "Vessel List"
+output: html_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(janitor)
+library(bigrquery)
+library(DBI)
+library(readxl)
+library(sf)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Raw vessel list
+all_vessels <- read_xlsx(path = file.path(project_data_path, "raw", "CAdiveboatlist_names.xlsx"),
+                         sheet = "Sheet1")
+
+```
+
+# Vessel Names
+
+Create a list of dive vessel names in Santa Barbara, Ventura, Oxnard, and Avalon.  
+
+```{r vessel-names}
+vessel_names <- all_vessels %>% 
+  clean_names() %>% 
+  filter(ca_area %in% c("Avalon", "Santa Barbara", "Ventura", "Oxnard"),
+         boat != 'Conception') %>% 
+  dplyr::select(boat, ca_area, operator) %>% 
+  arrange(ca_area) # 12 vessels to look for 
+
+# Upload to BigQuery
+bq_table(project = "emlab-gcp", table = "raw_vessel_names", dataset = "boi_dive_project") %>%
+  bq_table_upload(values = vessel_names, fields = vessel_names)
+```
+
+
+# Vessel Identities 
+
+Search for these 12 vessels in GFW and try to match vessel identities 
+
+```{r sql-identities}
+sql_identities <- "#StandardSQL
+
+WITH 
+
+  ######################
+  # List of normalized vessel names 
+  
+  vessel_names AS(
+  SELECT
+    boat AS shipname,
+    `world-fishing-827.udfs.normalize_shipname`(boat) AS n_shipname
+  FROM
+    `emlab-gcp.boi_dive_project.raw_vessel_names`
+  ),
+
+  ######################
+  # Matches from the vessel info tables
+  
+  vessel_info AS (
+    SELECT
+      *
+    FROM
+      `world-fishing-827.gfw_research.vi_ssvid_v20220101` a
+    INNER JOIN 
+      vessel_names b
+    ON(a.registry_info.best_known_shipname = b.n_shipname)
+  )
+  
+  ######################
+  # Matches flagged to USA
+  # Plus Sunfish match identified through vessel registry 
+  
+  SELECT 
+    * 
+  FROM 
+    vessel_info
+  WHERE best.best_flag = 'USA'
+  UNION ALL (
+    SELECT
+      *,
+      'Sunfish' AS shipname,
+      'SUNFISH' AS n_shipname
+    FROM
+      `world-fishing-827.gfw_research.vi_ssvid_v20220101`
+    WHERE
+      ssvid = '338350134'
+  )"
+```
+
+```{r run-save-identities}
+# Run query and write results to BigQuery
+bq_project_query("emlab-gcp",
+                 sql_identities,
+                 destination_table = bq_table(project = "emlab-gcp",
+                                              table = "initial_vessel_identity_matches",
+                                              dataset = "boi_dive_project"),
+                 use_legacy_sql = FALSE, allowLargeResults = TRUE,
+                 write_disposition = 'WRITE_TRUNCATE')
+```
+
+
+Searched the potential matches on Marine Traffic to identify which ones are likely our dive vessels based on vessel class and area of operation.
+Create a list of what we think are the dive vessels based on the matched identities.  
+
+```{r sql-vessel-list}
+sql_ais_list <- "#StandardSQL
+
+SELECT
+  ssvid,
+  n_shipname,
+  registry_info.best_known_callsign AS callsign
+FROM
+  `emlab-gcp.boi_dive_project.initial_vessel_identity_matches`
+WHERE ssvid IN ('367315630',
+  '367130890',
+  '367166830',
+  '367041160',
+  '367384840',
+  '367544000',
+  '338350134')"
+```
+
+```{r run-save-vessel-list}
+# Run query and write results to BigQuery
+bq_project_query("emlab-gcp",
+                 sql_ais_list,
+                 destination_table = bq_table(project = "emlab-gcp",
+                                              table = "ais_vessel_list",
+                                              dataset = "boi_dive_project"),
+                 use_legacy_sql = FALSE, allowLargeResults = TRUE,
+                 write_disposition = 'WRITE_TRUNCATE')
+```
+
+# Check Tracks
+
+Pull tracks for October 2020 for the 7 matched vessels and check to see if this lines up with activity in the Channel Islands
+
+```{r sql-tracks}
+sql_tracks <- "#StandardSQL
+
+WITH 
+
+  ######################
+  # List of vessel ssvids 
+  
+  vessels AS (
+  SELECT
+    ssvid
+  FROM
+    `emlab-gcp.boi_dive_project.ais_vessel_list`
+  ),
+
+  ######################
+  # Good segements 
+  
+  good_segments AS (
+    SELECT
+      seg_id
+    FROM
+      `world-fishing-827.pipe_production_v20201001.research_segs`
+    WHERE good_seg
+    AND NOT overlapping_and_short
+  ),
+
+  ######################
+  # Tracks for October 2020 
+  
+  tracks AS (
+    SELECT
+      *
+    FROM
+      `world-fishing-827.pipe_production_v20201001.research_messages`
+    WHERE ssvid IN (
+      SELECT
+        ssvid
+      FROM
+        vessels
+    )
+    AND seg_id IN (
+      SELECT
+        seg_id
+      FROM good_segments)
+    AND _PARTITIONTIME BETWEEN '2020-10-01' AND '2020-10-31'
+  )
+  
+  ######################
+  SELECT * FROM tracks"
+```
+
+```{r run-download-tracks}
+# Run and download tracks 
+tracks <- bq_project_query("emlab-gcp", sql_tracks) %>% 
+  bq_table_download(n_max = Inf)
+```
+
+```{r map-tracks}
+# Central CA coastline
+ca_counties <- tigris::counties() %>% 
+  filter(GEOID %in% c('06083', '06111', '06037'))
+
+# CI polygons
+ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# ssvid list (no tracks for Truth)
+ssvids <- unique(tracks$ssvid) #
+
+# Quick map of California for each of the 6 vessels 
+for(i in ssvids){
+  
+  vessel_id <- i
+  
+  track <- tracks %>% 
+    filter(ssvid == vessel_id) %>% 
+    arrange(timestamp)
+  
+  track_map <- ggplot() + 
+    geom_sf(data = ca_counties) + 
+    geom_sf(data = ci_polys) + 
+    geom_point(data = track,
+               aes(x=lon, y=lat)) +
+    labs(title = vessel_id)
+
+  print(track_map)
+} #ssvid: 367544000 is not the right one for Explorer; the others look good
+```
+
