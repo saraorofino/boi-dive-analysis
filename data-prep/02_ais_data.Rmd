@@ -1,0 +1,114 @@
+---
+title: "Vessel Tracks"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(bigrquery)
+library(DBI)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+```
+
+# Bounding Box 
+
+```{r check-bbox}
+# Central CA coastline
+ca_counties <- tigris::counties() %>% 
+  filter(GEOID %in% c('06083', '06111', '06037'))
+
+# CI polygons
+ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# bbox coords xmin: -121, xmax: -118; ymin: 32.5, ymax: 34.5
+bbox_coords <- matrix(c(-121, 32.5,
+                        -118, 32.5,
+                        -118, 34.5,
+                        -121, 34.5,
+                        -121, 32.5),
+                        ncol = 2, byrow = TRUE)
+
+bbox_poly <-st_polygon(list(bbox_coords))
+bbox_poly <- st_sfc(bbox_poly)
+st_crs(bbox_poly) <- 4326
+
+ggplot() + 
+  geom_sf(data = ca_counties) +
+  geom_sf(data = ci_polys) +
+  geom_sf(data = bbox_poly, color = 'midnightblue',
+          fill = NA)
+```
+
+# Query AIS Data
+
+Query all available AIS data 2012-2021 for the area around the Channel Islands including all vessel types. This will allow us to have the ability to pull vessel tracks for other possible dive vessels that we might not have matched previously based on names. 
+
+Bounding box: 
+  xmin: -121, xmax: -118
+  ymin: 32.5, ymax: 34.5
+
+```{r}
+sql_ais <- "#StandardSQL
+
+CREATE OR REPLACE TABLE
+  boi_dive_project.all_ci_ais_activity
+  PARTITION BY date
+  CLUSTER BY ssvid
+  AS
+
+WITH 
+
+good_segments AS (
+  SELECT
+    seg_id
+  FROM
+    `world-fishing-827.pipe_production_v20201001.research_segs`
+  WHERE good_seg
+  AND positions > 10
+  AND NOT overlapping_and_short
+),
+
+ais AS (
+ SELECT
+   *,
+   EXTRACT(DATE FROM timestamp) AS date
+ FROM
+  `world-fishing-827.pipe_production_v20201001.research_messages`
+ WHERE
+   seg_id IN (
+     SELECT
+       seg_id
+      FROM
+        good_segments
+   )
+  AND _PARTITIONTIME >= '2019-01-01'
+  AND (lon >= -121 AND lon <= -118)
+  AND (lat >= 32.5 AND lat <= 34.5)
+)
+
+SELECT * FROM ais"
+```
+
+```{r}
+bq_con <- DBI::dbConnect(bigquery(),
+                         project = "emlab-gcp",
+                         billing = "emlab-gcp"
+                         )
+
+# This table costs $50+ right now - have Tyler run it instead? 
+#test <- dbGetQuery(bq_con, sql_ais)
+```
+
