@@ -34,6 +34,8 @@ ca_counties <- us_counties %>%
   filter(GEOID %in% c('06083', '06111', '06037'))
 ```
 
+# Check Existing Anchorages 
+
 Check for any GFW anchorages near the Channel Islands, this may represent dive sites.
 
 ```{r query-anchorages}
@@ -127,8 +129,7 @@ Main ports by Island:
  - Santa Barbara: Landing Cove  
  - Catalina: Two Harbors and Avalon  
  - San Clemente: Wilson Cove and Pyramid Cove  
- 
-```{r save, include=F}
-write_csv(island_anchorages_clean, file.path(project_data_path, "processed", "initial_island_anchorages.csv"))
-```
 
+# Dive Sites
+
+Looks like the anchorages table does not pick up dive sites. We will adapt the anchorages algorithm and apply it to the dive vessels specifically to try and capture dive sites. 
