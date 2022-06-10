@@ -15,7 +15,12 @@ knitr::opts_chunk$set(
 ```{r libraries, include=F}
 # Load libraries
 library(tidyverse)
+library(glue)
+library(stringr)
 library(sf)
+library(paletteer)
+library(grDevices)
+library(colorspace)
 library(bigrquery)
 library(DBI)
 
@@ -52,19 +57,22 @@ ggplot() +
           fill = NA)
 ```
 
-# Query AIS Data
+# Query AIS Data 2021
 
-Query all available AIS data 2012-2021 for the area around the Channel Islands including all vessel types. This will allow us to have the ability to pull vessel tracks for other possible dive vessels that we might not have matched previously based on names. 
+For now just query all AIS data for 2021 for the area around the Channel Islands for all ssvids (11) on the AIS vessel list. 
 
 Bounding box: 
   xmin: -121, xmax: -118
   ymin: 32.5, ymax: 34.5
 
 ```{r}
+# Run in BQ console b/c of the create or replace statement
+# Query is very large 3Tb 
+# Saved as emlab-gcp.boi_dive_project.ci_ais_activity_2021
 sql_ais <- "#StandardSQL
 
 CREATE OR REPLACE TABLE
-  boi_dive_project.all_ci_ais_activity
+  emlab-gcp.boi_dive_project.ci_ais_activity_2021
   PARTITION BY date
   CLUSTER BY ssvid
   AS
@@ -94,21 +102,144 @@ ais AS (
       FROM
         good_segments
    )
-  AND _PARTITIONTIME >= '2019-01-01'
+  AND _PARTITIONTIME BETWEEN '2021-01-01' AND '2021-12-31'
   AND (lon >= -121 AND lon <= -118)
   AND (lat >= 32.5 AND lat <= 34.5)
+  AND ssvid IN (
+    SELECT
+      SAFE_CAST(ssvid AS STRING) AS ssvid
+    FROM
+      `emlab-gcp.boi_dive_project.ais_vessel_list`
+  )
 )
 
 SELECT * FROM ais"
 ```
 
-```{r}
-bq_con <- DBI::dbConnect(bigquery(),
-                         project = "emlab-gcp",
-                         billing = "emlab-gcp"
-                         )
+## Visualize AIS Data
 
-# This table costs $50+ right now - have Tyler run it instead? 
-#test <- dbGetQuery(bq_con, sql_ais)
+Visualize where vessels are moving throughout the Channel Islands and how long vessels are spending at different locations.  
+
+### Tracks
+
+```{r}
+# Run and download 
+tracks <- bq_table_download('emlab-gcp.boi_dive_project.ci_ais_activity_2021',
+                            n_max = Inf) %>% 
+  dplyr::select(ssvid, timestamp, lat, lon, hours, date)
+
+# Save 
+write_csv(tracks, file.path(project_data_path, "processed", "ais_tracks_2021.csv"))
+```
+
+```{r tracks}
+# Start by looking at SB, Ventura, and Oxnard dive operators
+ais_list <- read_csv(file.path(project_data_path, "processed", "ais_vessel_list.csv"))
+vessels <- ais_list %>% 
+  filter(ca_area %in% c('Santa Barbara', 'Ventura', 'Oxnard')) # 7 vessels
+
+# Read-in tracks
+tracks <- read_csv(file.path(project_data_path, "processed", "ais_tracks_2021.csv"))
+
+# Filter for just the SB, Ventura, Oxnard vessels
+tracks_filter <- tracks %>% 
+  filter(ssvid %in% vessels$ssvid) %>% 
+  arrange(timestamp)
+
+# Create labels for legend 
+pal_labels <- vessels %>% 
+  mutate(label = paste0(ssvid, ": ", str_to_sentence(n_shipname))) %>% 
+  arrange(label) %>% 
+  .$label
+
+# Colors: Everglades pal + purple from Redwoods (National park colors) 
+track_pal <- c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF', '#565F41FF', '#6E687EFF')
+
+# Plot vessel tracks (all)
+track_plot <- ggplot() + 
+  geom_sf(data = ca_counties) + 
+  geom_sf(data = ci_polys) + 
+  geom_point(data = tracks_filter,
+             aes(x = lon, 
+                 y = lat,
+                 color = ssvid),
+             alpha = 0.4) + 
+  geom_path(data = tracks_filter,
+            aes(x = lon, 
+                y = lat,
+                color = ssvid), 
+            alpha = 0.8) + 
+  scale_color_manual(values = track_pal,
+                     labels = pal_labels) + 
+  labs(title = "Dive Boat Vessel Tracks",
+       subtitle = "January 1, 2021 - December 31, 2021",
+       color = "") + 
+  theme_bw() + 
+  theme(axis.line = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(),
+        panel.background = element_blank())
+```
+
+```{r save-figure}
+ggsave(plot = track_plot,
+       filename = file.path(project_figure_path, "dive_vessel_track_map_2021.png"),
+       dpi = 300)
+```
+
+### Time Spent at a Particular Location
+
+To determine the length of time at a given location, we grid the AIS into 0.001 degree (or ~ 111 m) cells and sum the amount of time a vessel spends within a given grid cell.  
+
+```{r sql-time-by-location}
+sql_time_location <- "#StandardSQL
+
+SELECT
+  ssvid,
+  date,
+  lat_bin,
+  lon_bin,
+  SUM(hours) AS total_hours
+FROM (
+  SELECT
+    ssvid,
+    date,
+    FLOOR(lat * 1000) / 1000 AS lat_bin,
+    FLOOR(lon * 1000) / 1000 AS lon_bin,
+    hours
+  FROM
+    `emlab-gcp.boi_dive_project.ci_ais_activity_2021`
+)
+GROUP BY ssvid, date, lat_bin, lon_bin"
+
+# Run and download 
+binned_locations <- bq_project_query("emlab-gcp", sql_time_location) %>% 
+  bq_table_download(n_max = Inf)
+```
+
+```{r map}
+# Start by looking at tracks for operators in SB, Ventura, Oxnard
+binned_locations <- binned_locations %>% 
+  filter(ssvid %in% vessels$ssvid) %>% 
+  filter(total_hours > 0)
+
+ggplot() + 
+  geom_sf(data = ca_counties) +
+  geom_sf(data = ci_polys) +
+  geom_raster(data = binned_locations,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill = total_hours)) + 
+  scale_fill_continuous_sequential(palette = 'YlOrRd',
+                                   trans = 'log',
+                                   na.value = NA) + 
+  theme_bw() + 
+  theme(axis.line = element_blank(), 
+        axis.text = element_blank(),
+        axis.ticks = element_blank(), 
+        axis.title = element_blank(),
+        panel.background = element_blank()) + 
+  facet_wrap(~ssvid)
 ```
 
