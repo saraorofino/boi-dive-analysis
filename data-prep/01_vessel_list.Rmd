@@ -124,7 +124,9 @@ sql_ais_list <- "#StandardSQL
 SELECT
   ssvid,
   n_shipname,
-  registry_info.best_known_callsign AS callsign
+  registry_info.best_known_callsign AS callsign,
+  EXTRACT(DATE FROM activity.first_timestamp) AS ais_first_date,
+  EXTRACT(DATE FROM activity.last_timestamp) AS ais_last_date
 FROM
   `emlab-gcp.boi_dive_project.initial_vessel_identity_matches`
 WHERE ssvid IN ('367315630',
@@ -238,5 +240,94 @@ for(i in ssvids){
 
   print(track_map)
 } #ssvid: 367544000 is not the right one for Explorer; the others look good
+```
+
+## Add New Boats
+
+Add some new boats from an updated list Emma sent
+
+```{r add-new-boats}
+# Current list from BQ
+vessel_list <- bq_table_download('emlab-gcp.boi_dive_project.ais_vessel_list',
+                                 n_max = Inf)
+
+# Remove Explorer - not the right ssvid 
+vessel_list <- vessel_list %>% 
+  filter(n_shipname != 'EXPLORER')
+
+# New List
+new_vessels <- read_xlsx(file.path(project_data_path, "raw", "dive_boat_list.xlsx"),
+                         sheet = "Sheet1") %>% 
+  row_to_names(1) %>% 
+  clean_names() 
+
+# Vessels with ssvids
+new_ssvid <- new_vessels %>% 
+  filter(!is.na(mmsi)) %>% 
+  mutate(mmsi = as.numeric(mmsi),
+         n_shipname = gsub(" ", "", toupper(ship_name))) %>% 
+  dplyr::select(n_shipname, ssvid = mmsi, ca_area = departs_at, operator = company)
+
+# Filter out any that are already on the vessel list 
+ssvid_add <- new_ssvid %>% 
+  filter(! ssvid %in% vessel_list$ssvid) %>% 
+  mutate(ca_area = case_when(n_shipname == "CONCEPTION" ~ 'Santa Barbara',
+                             n_shipname == "MAGICIAN" ~ 'San Pedro',
+                             n_shipname == "PACIFICSTAR" ~ 'San Pedro',
+                             n_shipname == "MVHORIZON" ~ 'San Diego',
+                             TRUE ~ ca_area))
+
+# Get AIS data for these vessels 
+sql_new_ssvid <- "#StandardSQL
+
+SELECT
+  ssvid,
+  registry_info.best_known_shipname AS n_shipname,
+  registry_info.best_known_callsign AS callsign,
+  EXTRACT(DATE FROM activity.first_timestamp) AS ais_first_date,
+  EXTRACT(DATE FROM activity.last_timestamp) AS ais_last_date
+FROM
+  `world-fishing-827.gfw_research.vi_ssvid_v20220101`
+WHERE ssvid IN ('367616930',
+'367655170',
+'367098480',
+'338776000',
+'368024590')"
+
+# Run and download new info  
+new_ssvid_info <- bq_project_query("emlab-gcp", sql_new_ssvid) %>% 
+  bq_table_download(n_max = Inf)
+
+# Join to other dive info 
+new_vessels_all <- ssvid_add %>% 
+  mutate(n_shipname = ifelse(n_shipname == 'MVHORIZON', 'HORIZON', n_shipname)) %>% 
+  left_join(new_ssvid_info %>% 
+              mutate(ssvid = as.numeric(ssvid)), 
+            by = c("n_shipname", "ssvid"))
+```
+
+## Final List
+
+The final list of dive vessels includes the vessel MMSI, shipname, callsign, california area (e.g. Santa Barbara, Ventura, Long Beach), operator, first date active in AIS, and last date active in AIS (NA if still currently active). 
+
+```{r final-ais-list}
+# Current AIS list + operator info 
+current_vessels <- vessel_list %>% 
+  left_join(vessel_names %>% 
+              mutate(n_shipname = gsub(" ", "", toupper(boat)))) %>% 
+  dplyr::select(-boat)
+
+# All vessels
+all_vessels <- current_vessels %>% 
+  mutate(ssvid = as.numeric(ssvid)) %>% 
+  bind_rows(new_vessels_all) 
+
+# Replace AIS list table on BQ 
+bq_table(project = "emlab-gcp", table = "ais_vessel_list", dataset = "boi_dive_project") %>%
+  bq_table_upload(values = all_vessels, fields = all_vessels,
+                  write_disposition = 'WRITE_TRUNCATE')
+
+# Save csv
+write_csv(all_vessels, file.path(project_data_path, "processed", "ais_vessel_list.csv"))
 ```
 
