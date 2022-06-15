@@ -161,6 +161,7 @@ ggplot(data = sites_by_threshold) +
   scale_y_continuous(expand = c(0,0)) +
   theme_bw() # Do we have any sense of how many dive sites there are in the channel islands? 
 ```
+
 Mapping what dive sites are added as the time spent in a location decreases.   
 ```{r map-dive-sites}
 # Load CI shp 
@@ -194,11 +195,8 @@ for(i in site_threshold){
          subtitle = paste0("Max dive sites: ", maxi, "; Min dive sites: ", mini)) + 
     theme_bw()
   
-  return(site_map)
+  print(site_map)
 }
-
-
-
 ```
 
 
