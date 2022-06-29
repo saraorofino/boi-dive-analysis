@@ -33,7 +33,7 @@ all_vessels <- read_xlsx(path = file.path(project_data_path, "raw", "CAdiveboatl
 
 # Vessel Names
 
-Create a list of dive vessel names in Santa Barbara, Ventura, Oxnard, and Avalon.  
+Create a list of dive vessel names in southern California 
 
 ```{r vessel-names}
 vessel_names <- all_vessels %>% 
@@ -76,7 +76,7 @@ WITH
     SELECT
       *
     FROM
-      `world-fishing-827.gfw_research.vi_ssvid_v20220101` a
+      `world-fishing-827.gfw_research.vi_ssvid_v20220501` a
     INNER JOIN 
       vessel_names b
     ON(a.registry_info.best_known_shipname = b.n_shipname)
@@ -97,7 +97,7 @@ WITH
       'Sunfish' AS shipname,
       'SUNFISH' AS n_shipname
     FROM
-      `world-fishing-827.gfw_research.vi_ssvid_v20220101`
+      `world-fishing-827.gfw_research.vi_ssvid_v20220501`
     WHERE
       ssvid = '338350134'
   )"
@@ -153,13 +153,14 @@ vessels_to_research <- possible_matches %>%
   filter(!n_shipname %in% new_vessels$n_shipname)
 ```
 
-Searched the potential matches on Marine Traffic to identify which ones are likely our dive vessels based on vessel class and area of operation. This list includes 14 unique vessel names. The following vessels are found in Marine Traffic with a correct MMSI:  
+Searched the potential matches on Marine Traffic to identify which ones are likely our dive vessels based on vessel class and area of operation. This list includes 15 unique vessel names. The following vessels are found in Marine Traffic with a possibly correct MMSI:  
 
   - Islander: 366813530 (Ventura) or 367036830 (San Diego)  
+  - Pacific Moon: 368200240  
   - Ranger: 368926530 (Oxnard but Ranger vessel is supposed to be from San Pedro; gear type 'high speed craft')
   - Sunfish: 338350134  
 
-The MMSI of the remaining vessels were not determined to be correct based on vessel type and operating area:  \
+The MMSI of the remaining vessels were not determined to be correct based on vessel type and operating area:  
 
   - Asante   
   - Explorer  
@@ -181,12 +182,16 @@ matched_marine_traffic <- vessels_to_research %>%
 # Add to other matched vessels 
 matched_vessels <- new_vessels %>% 
   rename(shipname = ship_name) %>% 
-  bind_rows(matched_marine_traffic)
+  bind_rows(matched_marine_traffic) %>% 
+  # Add one match by hand that wasn't in the vessel list 
+  bind_rows(data.frame(ssvid = 368200240,
+                       n_shipname = 'PACIFICMOON',
+                       shipname = 'Pacific Moon'))
 ```
 
 # Check Tracks
 
-Pull tracks for October 2020 for the 14 matched vessels and check to see if this lines up with activity in the Channel Islands
+Pull tracks for October 2020 for the 15 matched vessels and check to see if this lines up with activity in the Channel Islands. In particular look at the two MMSI for Islander and the potential MMSI for the Ranger. 
 
 ```{r sql-tracks}
 sql_tracks <- "#StandardSQL
@@ -227,13 +232,14 @@ WITH
       '368024590', 
       '366813530',
       '367036830',
-      '368926530'
+      '368926530',
+      '368200240'
     )
     AND seg_id IN (
       SELECT
         seg_id
       FROM good_segments)
-    AND _PARTITIONTIME BETWEEN '2020-10-01' AND '2020-10-31'
+    AND _PARTITIONTIME BETWEEN '2021-10-01' AND '2021-10-31'
   )
   
   ######################
@@ -254,91 +260,97 @@ ca_counties <- tigris::counties() %>%
 # CI polygons
 ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
 
-# ssvid list (no tracks for Truth)
+# ssvid list (no tracks for Conception)
 ssvids <- unique(tracks$ssvid) 
-ssvids <- c('366813530', '367036830','368926530') 
+ssvids <- c('366813530', '367036830','368926530', '368200240') # Priority ssvids to check
 
 # Quick map of California for each of the 13 vessels 
 for(i in ssvids){
   
-  vessel_id <- ssvids[1]
+  vessel_id <- ssvids[3]
   
   track <- tracks %>% 
     filter(ssvid == vessel_id) %>% 
     arrange(timestamp)
   
   track_map <- ggplot() + 
-    geom_sf(data = ca_counties) + 
+    #geom_sf(data = ca_counties) + 
     geom_sf(data = ci_polys) + 
     geom_point(data = track,
                aes(x=lon, y=lat)) +
     labs(title = vessel_id)
 
   print(track_map)
-} #ssvid: 367544000 is not the right one for Explorer; the others look good
+} #ssvid: 367544000 is not the right one for Explorer; 366813530 or 367036830 could be right one for islander; 368926530 for Ranger doesn't seem right; 368200240 for Pacific Moon maybe right but didn't go anywhere in this track timeframe
 ```
 
 ## AIS Identity for Matched Vessels
 
-Still need to verify which ssvid is correct for Islander, and see if the Ranger ssvid seems right 
+The Explorer ssvid isn't correct since that vessel mainly operates in the Gulf of Mexico. There's a chance the Ranger id is correct but I don't think it is, it's listed as a high speed craft in Marine Traffic and the last location was in Hawaii so even though it has some tracks around the Channel Islands it doesn't seem like it's stopping at the islands regularly. Both of the ssvids for Islander might be correct as they are both showing tracks around the islands; 366813530 more around Santa Cruz and Anacapa and 367036830 more around San Clemente and Catalina.  
+
 ```{r sql-vessel-list}
 sql_ais_list <- "#StandardSQL
 
 SELECT
   ssvid,
   n_shipname,
+  shipname,
   registry_info.best_known_callsign AS callsign,
   EXTRACT(DATE FROM activity.first_timestamp) AS ais_first_date,
   EXTRACT(DATE FROM activity.last_timestamp) AS ais_last_date
 FROM
   `emlab-gcp.boi_dive_project.initial_vessel_identity_matches`
-WHERE ssvid IN ('367315630',
-  '367130890',
-  '367166830',
+WHERE ssvid IN ('338350134',
+  '338776000',
+  '366813530',
+  '367036830',
   '367041160',
+  '367098480',
+  '367130890', 
+  '367166830',
+  '367315630',
   '367384840',
-  '367544000',
-  '338350134', 
   '367616930',
   '367655170',
-  '367098480',
-  '338776000',
-  '368024590')"
+  '368024590',
+  '368926530')
+UNION ALL (
+    SELECT
+      ssvid,
+      ais_identity.n_shipname_mostcommon.value AS n_shipname,
+      'Pacific Moon' AS shipname,
+      registry_info.best_known_callsign AS callsign,
+      EXTRACT(DATE FROM activity.first_timestamp) AS ais_first_date,
+      EXTRACT(DATE FROM activity.last_timestamp) AS ais_last_date
+    FROM
+      `world-fishing-827.gfw_research.vi_ssvid_v20220501`
+    WHERE
+      ssvid = '368200240'
+  )"
 ```
 
-```{r run-save-vessel-list}
-# Run query and write results to BigQuery
-bq_project_query("emlab-gcp",
-                 sql_ais_list,
-                 destination_table = bq_table(project = "emlab-gcp",
-                                              table = "ais_vessel_list",
-                                              dataset = "boi_dive_project"),
-                 use_legacy_sql = FALSE, allowLargeResults = TRUE,
-                 write_disposition = 'WRITE_TRUNCATE')
+```{r run-download-vessel-list}
+# Run query and download results
+ais_list <- bq_project_query("emlab-gcp", sql_ais_list) %>% 
+  bq_table_download(n_max = Inf)
 ```
 
 ## Final List
 
-The final list of dive vessels includes the vessel MMSI, shipname, callsign, california area (e.g. Santa Barbara, Ventura, Long Beach), operator, first date active in AIS, and last date active in AIS (NA if still currently active). 
+The final list of dive vessels includes the vessel MMSI, shipname, IMO, California area (e.g. Santa Barbara, Ventura, Long Beach), operator, first date active in AIS, and last date active in AIS (NA if still currently active). 
 
 ```{r final-ais-list}
 # Current AIS list + operator info 
-current_vessels <- vessel_list %>% 
-  left_join(vessel_names %>% 
-              mutate(n_shipname = gsub(" ", "", toupper(boat)))) %>% 
-  dplyr::select(-boat)
+current_vessels <- ais_list %>% 
+  left_join(vessel_names, 
+            by = c('shipname' = 'boat'))
 
-# All vessels
-all_vessels <- current_vessels %>% 
-  mutate(ssvid = as.numeric(ssvid)) %>% 
-  bind_rows(new_vessels_all) 
-
-# Replace AIS list table on BQ 
+# Add AIS list table to BQ 
 bq_table(project = "emlab-gcp", table = "ais_vessel_list", dataset = "boi_dive_project") %>%
-  bq_table_upload(values = all_vessels, fields = all_vessels,
+  bq_table_upload(values = current_vessels, fields = current_vessels,
                   write_disposition = 'WRITE_TRUNCATE')
 
 # Save csv
-write_csv(all_vessels, file.path(project_data_path, "processed", "ais_vessel_list.csv"))
+write_csv(current_vessels, file.path(project_data_path, "processed", "ais_vessel_list.csv"))
 ```
 
