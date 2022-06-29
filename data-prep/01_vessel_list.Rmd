@@ -337,7 +337,7 @@ ais_list <- bq_project_query("emlab-gcp", sql_ais_list) %>%
 
 ## Final List
 
-The final list of dive vessels includes the vessel MMSI, shipname, IMO, California area (e.g. Santa Barbara, Ventura, Long Beach), operator, first date active in AIS, and last date active in AIS (NA if still currently active). 
+The final list of dive vessels includes the vessel MMSI, shipname, IMO, California area (e.g. Santa Barbara, Ventura, Long Beach), operator, first date active in AIS, and last date active in AIS (NA if still currently active). This list has 15 vessels of the 25 (60%) that are likely still operational in southern California.  
 
 ```{r final-ais-list}
 # Current AIS list + operator info 
