@@ -15,6 +15,8 @@ knitr::opts_chunk$set(
 # Load libraries
 library(tidyverse)
 library(janitor)
+library(stringr)
+library(readxl)
 library(sf)
 library(glue)
 library(bigrquery)
@@ -115,6 +117,7 @@ ggplot(compare_totals) +
   scale_y_continuous(expand = c(0,0)) +
   theme_bw()
 ```
+
 ## Compare Sites 
 
 For each of the identified time thresholds above, count the number of dives sites if a dive site is considered as a grid cell where more than 10, 20, 30, 40, or 50 vessels moving under 1 knot stop for at least the threshold amount of time  
@@ -200,114 +203,82 @@ for(i in site_threshold){
 ```
 
 
-## OLD 
-```{r}
-library(tigris)
-library(kableExtra)
+## Compare with Existing Database
 
-# Load CI shp 
-ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+Compare the identified dive sites above with a list of dive sites from Benioff's Spotting Giant Sea Bass project. This project allows users to enter dive site locations and record instances when giant sea bass are spotted. The list of dive sites identified through this database is a useful comparison for the dive sites identified through AIS data. Some of these dive sites are shore dive sites and some will be near the mainland not the Channel Islands. 
 
-# Load US counties shp 
-us_counties <- tigris::counties()
+```{r boi-sea-bass-dive-sites}
+# List of dive sites from Spotting Giant Sea Bass 
+seabass_sites <- read_xlsx(file.path(project_data_path, "raw", "SGSB_encounter_sites_reformatted.xlsx"),
+                           sheet = 'Sheet1') %>% 
+  clean_names()
 
-## Central CA counties 
-ca_counties <- us_counties %>% 
-  filter(GEOID %in% c('06083', '06111', '06037'))
-```
+# Filter out missing locations
+seabass_sites <- seabass_sites %>% 
+  filter(!is.na(latitude) | !is.na(longitude)) # 88 sites
 
-# Check Existing Anchorages 
+# Classify sites in Channel Islands 
+seabass_sites <- seabass_sites %>% 
+  mutate(ci_site = case_when(str_detect(site_name, "Anacapa") ~ 'yes',
+                             str_detect(site_name, "Catalina") ~ 'yes',
+                             str_detect(site_name, "Channel Islands") ~ 'yes',
+                             str_detect(site_name, "San Clemente") ~ 'yes',
+                             str_detect(site_name, "San Nicolas") ~ 'yes',
+                             str_detect(site_name, "Santa Barbara") ~ 'yes',
+                             str_detect(site_name, "Santa Cruz") ~ 'yes',
+                             TRUE ~ 'no'),
+         island = case_when(str_detect(site_name, "Anacapa") ~ 'Anacapa',
+                            str_detect(site_name, "Catalina") ~ 'Catalina',
+                            str_detect(site_name, "Channel Islands") ~ 'Channel Islands',
+                            str_detect(site_name, "San Clemente") ~ 'San Clemente',
+                            str_detect(site_name, "San Nicolas") ~ 'San Nicolas',
+                            str_detect(site_name, "Santa Barbara") ~ 'Santa Barbara',
+                            str_detect(site_name, "Santa Cruz") ~ 'Santa Cruz',
+                            TRUE ~ 'NA'))
 
-Check for any GFW anchorages near the Channel Islands, this may represent dive sites.
+# Filter for only CI sites
+ci_sites <- seabass_sites %>% 
+  filter(ci_site == 'yes') # 49 (56% of sites)
 
-```{r query-anchorages}
-sql_anchorages <- "#StandardSQL
+count_sites <- ci_sites %>% 
+  group_by(island) %>% 
+  count()
 
-  SELECT 
-    *
-  FROM 
-    `world-fishing-827.anchorages.named_anchorages_v20211026` 
-  WHERE (lon >= -121 AND lon <= -118)
-  AND (lat >= 32.5 AND lat <= 34.5)"
-
-anchorages <- bq_project_query("emlab-gcp",
-                               sql_anchorages) %>% 
-  bq_table_download(n_max = Inf)
-```
-
-Plot the results of the anchorages query over the central California counties and channel islands boundaries. It is likely that there will be anchorages for ports in Santa Barbara, Ventura, and LA included in these initial results. 
-```{r map-anchorages}
-ggplot() + 
+## Two maps to send to Molly & Lilly 
+# Map all sites
+all_sites_map <- ggplot() + 
   geom_sf(data = ca_counties, fill = NA) + 
   geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = anchorages, aes(x=lon, y=lat, color = label), alpha = 0.6)
-```
+  geom_point(data = seabass_sites,
+             aes(x=longitude, y=latitude, color = ci_site),
+             alpha = 0.7) + 
+  scale_color_manual(values = c('firebrick4', 'midnightblue'),
+                     labels = c('No', 'Yes')) + 
+  labs(x="",
+       y="",
+       title = "All Spotting Giant Sea Bass Dive Sites",
+       subtitle = "Sites = 88",
+       color = 'Channel Islands Site') + 
+  theme_bw() + 
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) 
 
-The map shows some overlap of anchorages in ports along the coast but there are also some that are associated with the islands. We need to narrow down these results for just the anchorages being shown near the islands. It looks like the following are labels of interest: Anacapa Isl, Avalon, AZ A, BF, Btai, Catalina Is, Isthmus Cove, Prisoners, San Diego, San Miguel Is, Santa Barbara Island, Santa Catalina Is, Santa Cruz Island, Santa Rosa Is, SantaBarbara, Scorpion Anch, Whites Cove Catalina, and Wilson Cove 
-
-```{r}
-island_anchorages <- anchorages %>% 
-  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
-                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
-                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
-                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
-                      'WILSON COVE')) %>% 
-  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
-  filter(s2id != '80e8f09d' & s2id != '80eea361')
-
-# Check on map 
-ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
+# Map CI sites
+island_cols <- c('#F4E7C5FF', '#678096FF', '#ACC2CFFF', '#979461FF', '#CD5733FF', '#A12A19FF', '#6E6C81FF')
+ci_sites_map <- ggplot() + 
+  #geom_sf(data = ca_counties, fill = NA) + 
   geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = island_anchorages, aes(x=lon, y=lat, color = label), alpha = 0.6) # Good 
-
-
-# Clean up anchorages dataset 
-island_anchorages_clean <- island_anchorages %>% 
-  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
-  mutate(label = ifelse(s2id == '80e8fa5b' | s2id == '80e8fa45', 'SANTA CRUZ ISLAND', label)) %>% 
-  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
-                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
-                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
-                                      label == 'ANACAPA ISL' ~ "Anacapa",
-                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
-                                      label == 'AVALON' | label == 'CATALINA IS' | 
-                                        label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
-                                        label == 'ISTHMUS COVE' ~ "Catalina",
-                                      TRUE ~ 'Santa Cruz')) %>% 
-  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
-                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
-                unique_active_ssvid, unique_total_ssvid)
-
-# Summarize anchorages by island 
-anch_by_island <- island_anchorages_clean %>% 
-  group_by(anchorage_island) %>% 
-  summarize(n_anchorages_gfw = n()) %>% 
-  adorn_totals('row')
-
-kable(anch_by_island,
-      col.names = c("Island", "Number of Anchorages"),
-      caption = "Number of anchorages found in GFW by island.") %>% 
-  kable_classic_2()
+  geom_point(data = ci_sites,
+             aes(x=longitude, y=latitude, color = island),
+             alpha = 0.7) + 
+  scale_color_manual(values = island_cols) +
+  labs(x="",
+       y="",
+       title = "CI Spotting Giant Sea Bass Dive Sites",
+       subtitle = "Sites = 49",
+       color = "") + 
+  theme_bw() + 
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
 ```
 
-```{r map-by-island}
-# Check on map 
-ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = island_anchorages_clean, aes(x=lon, y=lat, color = anchorage_island), alpha = 0.6) +
-  labs(x = "",
-       y = "",
-       color = 'Island') + 
-  theme_bw() # Good 
-```
-Main ports by Island: 
-
- - San Miguel: Cuyler Harbor  
- - Santa Rosa: Bechers Bay  
- - Santa Cruz: Prisoners Harbor and Scorpion  
- - Anacapa: East End Landing Cove  
- - Santa Barbara: Landing Cove  
- - Catalina: Two Harbors and Avalon  
- - San Clemente: Wilson Cove and Pyramid Cove  
