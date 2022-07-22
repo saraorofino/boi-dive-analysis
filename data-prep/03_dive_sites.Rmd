@@ -377,9 +377,11 @@ for(i in site_threshold){
 
 # Compare Sites
 
-Finally, we compare the various dive sites identified in the AIS data to those from the Spotting Giant Seabass dataset.  
+Anacapa island has the largest number of dive sites in the Spotting Giant Sea Bass dataset. We compare the AIS identified dive sites to the SGSB identified dive sites for Anacapa Island in the map below.  
 
-```{r compare-dive-sites}
+<br>   
+
+```{r compare-dive-sites, include=F}
 # Bin SGSB sites to 0.001 x 0.001 degrees
 ci_sites_binned <- ci_sites %>% 
   mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
@@ -387,14 +389,128 @@ ci_sites_binned <- ci_sites %>%
   dplyr::select(site_name, lat_bin, lon_bin, island)
 
 compare_sgsb <- compare_sites %>% 
-  left_join(ci_sites_binned, by = c("lat_bin", "lon_bin")) # Only 5 sites of the 48... 
+  dplyr::select(lat_bin, lon_bin) %>% 
+  distinct() %>% 
+  full_join(ci_sites_binned, by = c("lat_bin", "lon_bin")) %>% 
+  mutate(site_source = ifelse(is.na(site_name), 'ais', 'sgsb')) 
 
-# Check for matches in just the binned locations
-match_to_bins <- binned_locations %>% 
-  left_join(ci_sites_binned) # 17 of 48 initial matches 
+## Anacapa 
+anacapa_shp <- ci_shp %>% 
+  filter(poly_id == 'Anacapa')
 
-# To-do: Anacapa has the most dive sites; look at a map of Anacapa dive sites (grid cell) in SGSB vs. map of dive sites in AIS
-# Make a df that has the unique x/y locations from the compare sites (filter for around Anacapa) & bind rows for anacapa dive sites in SGSB
-# mutate a row for 'dataset' or something where it's either 'AIS' or 'SGSB' and then map as a raster over the Anacapa island shp 
+anacapa_map <- ggplot() + 
+  geom_sf(data = anacapa_shp) + 
+  geom_raster(data = compare_sgsb,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill=site_source)) +
+  scale_fill_manual(values = c('cadetblue', 'firebrick4')) + 
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  coord_sf(xlim = c(-119.45, -119.35),
+           ylim = c(34.000, 34.019)) +
+  labs(x="",
+       y="",
+       fill = "Site Source",
+       title = 'Anacapa Island') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+## Catalina
+catalina_shp <- ci_shp %>% 
+  filter(poly_id == 'Catalina')
+
+catalina_map <- ggplot() + 
+  geom_sf(data = catalina_shp) + 
+  geom_raster(data = compare_sgsb,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill=site_source)) +
+  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  coord_sf(xlim = c(-118.60, -118.31),
+           ylim = c(33.30, 33.48)) +
+  labs(x="",
+       y="",
+       fill = "Site Source",
+       title = 'Catalina Island') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+## San Clemente
+sanclem_shp <- ci_shp %>% 
+  filter(poly_id == 'San Clemente')
+
+sanclem_map <- ggplot() + 
+  geom_sf(data = sanclem_shp) + 
+  geom_raster(data = compare_sgsb,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill=site_source)) +
+  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  coord_sf(xlim = c(-118.61, -118.34),
+           ylim = c(32.8, 33.05)) +
+  labs(x="",
+       y="",
+       fill = "Site Source",
+       title = 'San Clemente Island') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+## Santa Barbara
+santabarb_shp <- ci_shp %>% 
+  filter(poly_id == 'Santa Barbara')
+
+santabarb_map <- ggplot() + 
+  geom_sf(data = santabarb_shp) + 
+  geom_raster(data = compare_sgsb,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill=site_source)) +
+  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  coord_sf(xlim = c(-119.055, -119.025),
+           ylim = c(33.461, 33.490)) +
+  labs(x="",
+       y="",
+       fill = "Site Source",
+       title = 'Santa Barbara Island') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+## Santa Cruz
+santacruz_shp <- ci_shp %>% 
+  filter(poly_id == 'Santa Cruz')
+
+santacruz_map <- ggplot() + 
+  geom_sf(data = santacruz_shp) + 
+  geom_raster(data = compare_sgsb,
+              aes(x=lon_bin,
+                  y=lat_bin,
+                  fill=site_source)) +
+  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  coord_sf(xlim = c(-119.95, -119.5),
+           ylim = c(33.956, 34.082)) +
+  labs(x="",
+       y="",
+       fill = "Site Source",
+       title = 'Santa Cruz Island') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+```{r}
+anacapa_map
 ```
 
