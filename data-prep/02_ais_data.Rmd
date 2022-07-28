@@ -57,22 +57,18 @@ ggplot() +
           fill = NA)
 ```
 
-# Query AIS Data 2021
+# Query AIS Data
 
-For now just query all AIS data for 2021 for the area around the Channel Islands for all ssvids (11) on the AIS vessel list. 
-
-Bounding box: 
-  xmin: -121, xmax: -118
-  ymin: 32.5, ymax: 34.5
+Query all AIS data for all ssvids (15) on the AIS vessel list. 
 
 ```{r}
 # Run in BQ console b/c of the create or replace statement
-# Query is very large 3Tb 
-# Saved as emlab-gcp.boi_dive_project.ci_ais_activity_2021
+# Query is very large 1.3Tb 
+# Saved as emlab-gcp.boi_dive_project.ais_activity_all_years
 sql_ais <- "#StandardSQL
 
 CREATE OR REPLACE TABLE
-  emlab-gcp.boi_dive_project.ci_ais_activity_2021
+  emlab-gcp.boi_dive_project.ais_activity_all_years
   PARTITION BY date
   CLUSTER BY ssvid
   AS
@@ -85,7 +81,6 @@ good_segments AS (
   FROM
     `world-fishing-827.pipe_production_v20201001.research_segs`
   WHERE good_seg
-  AND positions > 10
   AND NOT overlapping_and_short
 ),
 
@@ -102,23 +97,57 @@ ais AS (
       FROM
         good_segments
    )
-  AND _PARTITIONTIME BETWEEN '2021-01-01' AND '2021-12-31'
-  AND (lon >= -121 AND lon <= -118)
-  AND (lat >= 32.5 AND lat <= 34.5)
-  AND ssvid IN (
-    SELECT
-      SAFE_CAST(ssvid AS STRING) AS ssvid
-    FROM
-      `emlab-gcp.boi_dive_project.ais_vessel_list`
+  AND ssvid IN ('338350134',
+  '368200240',
+  '368926530',
+  '367166830',
+  '366813530',
+  '367036830',
+  '367130890',
+  '367315630',
+  '338776000',
+  '367616930',
+  '367655170',
+  '368024590',
+  '367041160',
+  '367098480',
+  '367384840'
   )
 )
 
 SELECT * FROM ais"
 ```
 
+Create a second table of just the activity within the Channel Islands bounding box for easier processing  
+
+Bounding box: 
+  xmin: -121, xmax: -118
+  ymin: 32.5, ymax: 34.5
+  
+```{r}
+sql_ci <- "#StandardSQL
+
+SELECT
+  *
+FROM
+  `emlab-gcp.boi_dive_project.ais_activity_all_years`
+WHERE
+  (lon >= -121 AND lon <= -118)
+  AND (lat >= 32.5 AND lat <= 34.5)"
+
+# Run query and write results to BigQuery
+bq_project_query("emlab-gcp",
+                 sql_ci,
+                 destination_table = bq_table(project = "emlab-gcp",
+                                              table = "ci_ais_activity_all_years",
+                                              dataset = "boi_dive_project"),
+                 use_legacy_sql = FALSE, allowLargeResults = TRUE,
+                 write_disposition = 'WRITE_TRUNCATE')
+```
+  
 ## Visualize AIS Data
 
-Visualize where vessels are moving throughout the Channel Islands and how long vessels are spending at different locations.  
+Visualize where vessels are moving throughout the Channel Islands using 2021 as a test year.    
 
 ### Tracks
 
@@ -133,42 +162,40 @@ write_csv(tracks, file.path(project_data_path, "processed", "ais_tracks_2021.csv
 ```
 
 ```{r tracks}
-# Start by looking at SB, Ventura, and Oxnard dive operators
 ais_list <- read_csv(file.path(project_data_path, "processed", "ais_vessel_list.csv"))
-vessels <- ais_list %>% 
-  filter(ca_area %in% c('Santa Barbara', 'Ventura', 'Oxnard')) # 7 vessels
 
 # Read-in tracks
-tracks <- read_csv(file.path(project_data_path, "processed", "ais_tracks_2021.csv"))
+tracks <- read_csv(file.path(project_data_path, "processed", "ais_tracks_2021.csv")) %>% 
+  mutate(ssvid = as.character(ssvid))
 
-# Filter for just the SB, Ventura, Oxnard vessels
-tracks_filter <- tracks %>% 
-  filter(ssvid %in% vessels$ssvid) %>% 
-  arrange(timestamp)
+# Unique ssvids
+track_ssvids <- unique(tracks$ssvid)
 
 # Create labels for legend 
-pal_labels <- vessels %>% 
+pal_labels <- ais_list %>% 
+  filter(ssvid %in% track_ssvids) %>% 
   mutate(label = paste0(ssvid, ": ", str_to_sentence(n_shipname))) %>% 
   arrange(label) %>% 
   .$label
 
-# Colors: Everglades pal + purple from Redwoods (National park colors) 
-track_pal <- c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF', '#565F41FF', '#6E687EFF')
+# Colors: Everglades pal + purple, grey, orange, light green from Redwoods + dark blue from BlueRidgePkwy (National park colors) 
+track_pal <- c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF', '#565F41FF', 
+               '#6E687EFF', "#F17236FF", "#BDB2A7FF", "#769370FF", "#163343FF")
 
 # Plot vessel tracks (all)
 track_plot <- ggplot() + 
   geom_sf(data = ca_counties) + 
   geom_sf(data = ci_polys) + 
-  geom_point(data = tracks_filter,
+  geom_point(data = tracks,
              aes(x = lon, 
                  y = lat,
                  color = ssvid),
              alpha = 0.4) + 
-  geom_path(data = tracks_filter,
-            aes(x = lon, 
+  geom_path(data = tracks,
+            aes(x = lon,
                 y = lat,
-                color = ssvid), 
-            alpha = 0.8) + 
+                color = ssvid),
+            alpha = 0.8) +
   scale_color_manual(values = track_pal,
                      labels = pal_labels) + 
   labs(title = "Dive Boat Vessel Tracks",
