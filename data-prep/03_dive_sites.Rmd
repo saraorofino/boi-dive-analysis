@@ -38,7 +38,7 @@ ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_
 
 ## Central CA counties 
 ca_counties <- tigris::counties() %>% 
-  filter(GEOID %in% c('06083', '06111', '06037'))
+  filter(GEOID %in% c('06083', '06111', '06037', '06059', '06073'))
 ```
 
 
@@ -176,6 +176,75 @@ ci_sites_map
 
 Converting these dive site locations into 0.001 x 0.001 degree grids there are no grids containing more than 1 dive site which makes it seem like an appropriate resolution to use for the AIS data when looking for additional sites. 
 
+# GFW Anchorages
+
+Check for any existing GFW anchorages near the Channel Islands. Some of these probably represent harbors or ports and we wouldn't want to accidentally consider these as dive sites if vessels spend longer periods of time here.  
+
+```{r query-anchorages}
+sql_anchorages <- "#StandardSQL
+  SELECT 
+    *
+  FROM 
+    `world-fishing-827.anchorages.named_anchorages_v20211026` 
+  WHERE (lon >= -121 AND lon <= -118)
+  AND (lat >= 32.5 AND lat <= 34.5)"
+
+anchorages <- bq_project_query("emlab-gcp",
+                               sql_anchorages) %>% 
+  bq_table_download(n_max = Inf)
+```
+
+Some of these anchorages appear likely associated with the Channel Islands. We narrow down these results for just the anchorages being shown near the islands by including those with the following labels: Anacapa Isl, Avalon, AZ A, BF, Btai, Catalina Is, Isthmus Cove, Prisoners, San Diego, San Miguel Is, Santa Barbara Island, Santa Catalina Is, Santa Cruz Island, Santa Rosa Is, SantaBarbara, Scorpion Anch, Whites Cove Catalina, and Wilson Cove  
+
+```{r}
+island_anchorages <- anchorages %>% 
+  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
+                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
+                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
+                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
+                      'WILSON COVE')) %>% 
+  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
+  filter(s2id != '80e8f09d' & s2id != '80eea361')
+
+# Clean up anchorages dataset 
+island_anchorages_clean <- island_anchorages %>% 
+  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
+  mutate(label = ifelse(s2id == '80e8fa5b' | s2id == '80e8fa45', 'SANTA CRUZ ISLAND', label)) %>% 
+  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
+                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
+                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
+                                      label == 'ANACAPA ISL' ~ "Anacapa",
+                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
+                                      label == 'AVALON' | label == 'CATALINA IS' | 
+                                        label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
+                                        label == 'ISTHMUS COVE' ~ "Catalina",
+                                      TRUE ~ 'Santa Cruz'),
+         lat_bin = floor(lat * 1000) / 1000 + 0.0005,
+         lon_bin = floor(lon * 1000) / 1000 + 0.0005) %>% 
+  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
+                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
+                unique_active_ssvid, unique_total_ssvid, lat_bin, lon_bin)
+
+# Check on map 
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = island_anchorages_clean, aes(x=lon, y=lat, color = anchorage_island), alpha = 0.6) +
+  labs(x = "",
+       y = "",
+       color = 'Island') + 
+  theme_bw() # Good 
+```
+
+Main ports by Island: 
+ - San Miguel: Cuyler Harbor  
+ - Santa Rosa: Bechers Bay  
+ - Santa Cruz: Prisoners Harbor and Scorpion  
+ - Anacapa: East End Landing Cove  
+ - Santa Barbara: Landing Cove  
+ - Catalina: Two Harbors and Avalon  
+ - San Clemente: Wilson Cove and Pyramid Cove  
+ 
 # AIS Dive Sites
 
 The following approach is used to try and determine dive site locations.  
@@ -189,10 +258,10 @@ This method is a rough adaptation of the GFW anchorage algorithm, more details a
 
 ## Bin Coordinates 
 
-A table of 2021 AIS data for 10 unique dive vessels is saved in Google Big Query. We grid this table to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
+We use AIS data from 2016-2021 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
 
 ```{r sql-bin-locations}
-# Keeping only coordinates where vessels moved slower than 1 knot 
+# Keeping only coordinates where vessels moved slower than 1 knot 2016-2021
 sql_bin_locations <- "#StandardSQL
 
 SELECT
@@ -209,8 +278,10 @@ FROM (
     FLOOR(lon * 1000) / 1000 + 0.0005 AS lon_bin,
     hours
   FROM
-    `emlab-gcp.boi_dive_project.ci_ais_activity_2021`
+    `emlab-gcp.boi_dive_project.ci_ais_activity_all_years`
   WHERE speed_knots < 1
+  AND EXTRACT(year FROM date) >= 2016
+  AND EXTRACT(year FROM date) <= 2021
 )
 GROUP BY ssvid, date, lat_bin, lon_bin"
 
@@ -221,23 +292,40 @@ binned_locations <- bq_project_query("emlab-gcp", sql_bin_locations) %>%
 
 ## Test Thresholds
 
-The histogram below checks the distribution of the total time spent by a vessel in each grid cell. A vast majority of the positions spend between 0 and 3 hours in a given grid cell although occasionally vessels remain in a grid cell for 12+ hours which may indicate an over night visit. However, since dive vessels may anchor at a dive site overnight that they either ended a night dive or plan to dive in the morning we don't want to exclude these positions. 
+The histogram below checks the distribution of the total time spent by a vessel in each grid cell. A vast majority of the positions spend between 0 and 4 hours in a given grid cell although occasionally vessels remain in a grid cell for 12+ hours which may indicate an over night visit. However, since dive vessels may anchor at a dive site overnight that they either ended a night dive or plan to dive in the morning we don't want to exclude these positions. 
 
 ```{r time-distribution}
 # Check distribution of total time
 ggplot(binned_locations, aes(x=total_hours)) +
-  geom_histogram(binwidth = 3,
+  geom_histogram(binwidth = 4,
                  boundary = 0,
                  fill = 'slategrey',
                  alpha = 0.95) +
   scale_x_continuous(expand = c(0,0),
-                     limits = c(0,30),
-                     breaks = seq(0,30,by=3)) + 
+                     limits = c(0,40),
+                     breaks = seq(0,40,by=4)) + 
   scale_y_continuous(expand = c(0,0)) +
   labs(y = 'Number of AIS positions',
        x = 'Time in grid cell') + 
-  theme_bw() # Most positions are 0-3 hours
+  theme_bw() # Most positions are 0-4 hours
 ```
+```{r check, include=F}
+# Positions over 12 hours only
+over_12hr <- binned_locations %>% 
+  filter(total_hours >= 12) # All 15 vessels at 250 locations... 
+
+# See if/how many of these positions overlap with harbors
+harbor_overlap <- over_12hr %>% 
+  left_join(island_anchorages_clean, by = c("lat_bin", "lon_bin")) %>% 
+  filter(!is.na(anchorage_id)) %>% 
+  dplyr::select(lat_bin, lon_bin, anchorage_id, anchorage_gfw_label, anchorage_island) %>% 
+  distinct() # Only 7... 
+```
+
+<br>  
+
+It looks like only 7 of the locations are the same grid cells identified as anchorages in the GFW anchorage dataset. We can double check after the final "dive site" determination to ensure that none of the dive sites overlap with harbors and ports.    
+
 <br>  
 
 The first step is to identify grid cells "visited" by dive vessels, we consider a grid cell "visited" if a dive vessel remains stationary for at least a certain amount of time. We will test this time threshold at 15 minute increments from 45 minutes to 2 hours. This threshold indicates the minimum amount of time a vessel must remain in a grid cell to count it as 'visited', e.g. a visit is any instance where a vessel remains stationary within a grid cell for at least 45 minutes vs. where a vessel remains stationary for at least 2 hours.    
@@ -296,7 +384,7 @@ The graph below shows the number of grid cells considered as dive sites for each
 
 ```{r compare-sites}
 # Number of dives to be considered a dive site
-site_threshold <- seq(5,25,5)
+site_threshold <- seq(10,50,10)
 
 compare_sites  <- NULL
 
@@ -333,7 +421,7 @@ ggplot(data = sites_by_threshold) +
        y="Number of dive sites",
        fill = "Time threshold") + 
   scale_x_continuous(expand = c(0,0),
-                     breaks = seq(5,25,5)) + 
+                     breaks = seq(10,50,10)) + 
   scale_y_continuous(expand = c(0,0)) +
   theme_bw()
 ```
@@ -342,12 +430,37 @@ ggplot(data = sites_by_threshold) +
 
 The maps below identify what dive sites are added as the time threshold decreases. It first identifies grid cells considered as "dive sites" if the time spent in a grid cell is at least 2 hours. It then looks at what new grid cells are added if the time spent in a grid cell decreases to 1 hour and 45 minutes, etc. 
 
-There is a different map for each of the site thresholds (i.e. 5 dives per year, 10 dives per year, etc.)
+There is a different map for each of the site thresholds (i.e. 10 dives per year, 20 dives per year, etc.)
 
 ```{r map-dive-sites}
+# Identify thecoastal sites that aren't in the CI 
+coastal_sites <- compare_sites %>%
+  filter(site_threshold == 10) %>% 
+  mutate(coastal_site = case_when(lat_bin > 34.1 ~ 'yes',
+                                  lat_bin == 33.7235 ~ 'yes',
+                                  lat_bin == 33.7245 ~ 'yes',
+                                  TRUE ~ 'no'))
+
+# Confirm we have the correct sites to remove 
+check_map <- ggplot() + 
+    geom_sf(data = ca_counties, fill = NA) + 
+    geom_sf(data = ci_shp, fill = NA) + 
+    geom_point(data = coastal_sites,
+               aes(x=lon_bin, y=lat_bin, color = coastal_site)) # Looks good 
+    
+# Remove the sites that look like they're coastal and not in the CI 
+compare_sites_filtered <- compare_sites %>% 
+  mutate(coastal_site = case_when(lat_bin > 34.1 ~ 'yes',
+                                  lat_bin == 33.7235 ~ 'yes',
+                                  lat_bin == 33.7245 ~ 'yes',
+                                  TRUE ~ 'no')) %>% 
+  filter(coastal_site != 'yes') %>% 
+  dplyr::select(-coastal_site)
+  
+  
 for(i in site_threshold){
   
-  site_cutoff <- compare_sites %>% 
+  site_cutoff <- compare_sites_filtered %>% 
     filter(site_threshold == i,
            dive_site == 1) %>% 
     mutate(time_threshold = factor(time_threshold))
@@ -388,7 +501,7 @@ ci_sites_binned <- ci_sites %>%
          lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
   dplyr::select(site_name, lat_bin, lon_bin, island)
 
-compare_sgsb <- compare_sites %>% 
+compare_sgsb <- compare_sites_filtered %>% 
   dplyr::select(lat_bin, lon_bin) %>% 
   distinct() %>% 
   full_join(ci_sites_binned, by = c("lat_bin", "lon_bin")) %>% 
