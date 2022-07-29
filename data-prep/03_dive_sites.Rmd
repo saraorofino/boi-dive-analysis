@@ -176,75 +176,6 @@ ci_sites_map
 
 Converting these dive site locations into 0.001 x 0.001 degree grids there are no grids containing more than 1 dive site which makes it seem like an appropriate resolution to use for the AIS data when looking for additional sites. 
 
-# GFW Anchorages
-
-Check for any existing GFW anchorages near the Channel Islands. Some of these probably represent harbors or ports and we wouldn't want to accidentally consider these as dive sites if vessels spend longer periods of time here.  
-
-```{r query-anchorages}
-sql_anchorages <- "#StandardSQL
-  SELECT 
-    *
-  FROM 
-    `world-fishing-827.anchorages.named_anchorages_v20211026` 
-  WHERE (lon >= -121 AND lon <= -118)
-  AND (lat >= 32.5 AND lat <= 34.5)"
-
-anchorages <- bq_project_query("emlab-gcp",
-                               sql_anchorages) %>% 
-  bq_table_download(n_max = Inf)
-```
-
-Some of these anchorages appear likely associated with the Channel Islands. We narrow down these results for just the anchorages being shown near the islands by including those with the following labels: Anacapa Isl, Avalon, AZ A, BF, Btai, Catalina Is, Isthmus Cove, Prisoners, San Diego, San Miguel Is, Santa Barbara Island, Santa Catalina Is, Santa Cruz Island, Santa Rosa Is, SantaBarbara, Scorpion Anch, Whites Cove Catalina, and Wilson Cove  
-
-```{r}
-island_anchorages <- anchorages %>% 
-  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
-                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
-                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
-                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
-                      'WILSON COVE')) %>% 
-  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
-  filter(s2id != '80e8f09d' & s2id != '80eea361')
-
-# Clean up anchorages dataset 
-island_anchorages_clean <- island_anchorages %>% 
-  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
-  mutate(label = ifelse(s2id == '80e8fa5b' | s2id == '80e8fa45', 'SANTA CRUZ ISLAND', label)) %>% 
-  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
-                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
-                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
-                                      label == 'ANACAPA ISL' ~ "Anacapa",
-                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
-                                      label == 'AVALON' | label == 'CATALINA IS' | 
-                                        label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
-                                        label == 'ISTHMUS COVE' ~ "Catalina",
-                                      TRUE ~ 'Santa Cruz'),
-         lat_bin = floor(lat * 1000) / 1000 + 0.0005,
-         lon_bin = floor(lon * 1000) / 1000 + 0.0005) %>% 
-  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
-                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
-                unique_active_ssvid, unique_total_ssvid, lat_bin, lon_bin)
-
-# Check on map 
-ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = island_anchorages_clean, aes(x=lon, y=lat, color = anchorage_island), alpha = 0.6) +
-  labs(x = "",
-       y = "",
-       color = 'Island') + 
-  theme_bw() # Good 
-```
-
-Main ports by Island: 
- - San Miguel: Cuyler Harbor  
- - Santa Rosa: Bechers Bay  
- - Santa Cruz: Prisoners Harbor and Scorpion  
- - Anacapa: East End Landing Cove  
- - Santa Barbara: Landing Cove  
- - Catalina: Two Harbors and Avalon  
- - San Clemente: Wilson Cove and Pyramid Cove  
- 
 # AIS Dive Sites
 
 The following approach is used to try and determine dive site locations.  
@@ -260,7 +191,7 @@ This method is a rough adaptation of the GFW anchorage algorithm, more details a
 
 We use AIS data from 2016-2021 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
 
-```{r sql-bin-locations}
+```{r sql-bin-locations, include=F}
 # Keeping only coordinates where vessels moved slower than 1 knot 2016-2021
 sql_bin_locations <- "#StandardSQL
 
@@ -309,23 +240,6 @@ ggplot(binned_locations, aes(x=total_hours)) +
        x = 'Time in grid cell') + 
   theme_bw() # Most positions are 0-4 hours
 ```
-```{r check, include=F}
-# Positions over 12 hours only
-over_12hr <- binned_locations %>% 
-  filter(total_hours >= 12) # All 15 vessels at 250 locations... 
-
-# See if/how many of these positions overlap with harbors
-harbor_overlap <- over_12hr %>% 
-  left_join(island_anchorages_clean, by = c("lat_bin", "lon_bin")) %>% 
-  filter(!is.na(anchorage_id)) %>% 
-  dplyr::select(lat_bin, lon_bin, anchorage_id, anchorage_gfw_label, anchorage_island) %>% 
-  distinct() # Only 7... 
-```
-
-<br>  
-
-It looks like only 7 of the locations are the same grid cells identified as anchorages in the GFW anchorage dataset. We can double check after the final "dive site" determination to ensure that none of the dive sites overlap with harbors and ports.    
-
 <br>  
 
 The first step is to identify grid cells "visited" by dive vessels, we consider a grid cell "visited" if a dive vessel remains stationary for at least a certain amount of time. We will test this time threshold at 15 minute increments from 45 minutes to 2 hours. This threshold indicates the minimum amount of time a vessel must remain in a grid cell to count it as 'visited', e.g. a visit is any instance where a vessel remains stationary within a grid cell for at least 45 minutes vs. where a vessel remains stationary for at least 2 hours.    
@@ -433,7 +347,7 @@ The maps below identify what dive sites are added as the time threshold decrease
 There is a different map for each of the site thresholds (i.e. 10 dives per year, 20 dives per year, etc.)
 
 ```{r map-dive-sites}
-# Identify thecoastal sites that aren't in the CI 
+# Identify the coastal sites that aren't in the CI 
 coastal_sites <- compare_sites %>%
   filter(site_threshold == 10) %>% 
   mutate(coastal_site = case_when(lat_bin > 34.1 ~ 'yes',
@@ -491,10 +405,8 @@ for(i in site_threshold){
 # Compare Sites
 
 Anacapa island has the largest number of dive sites in the Spotting Giant Sea Bass dataset. We compare the AIS identified dive sites to the SGSB identified dive sites for Anacapa Island in the map below.  
-
 <br>   
-
-```{r compare-dive-sites, include=F}
+```{r compare-dive-sites}
 # Bin SGSB sites to 0.001 x 0.001 degrees
 ci_sites_binned <- ci_sites %>% 
   mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
@@ -621,9 +533,115 @@ santacruz_map <- ggplot() +
   theme_bw() +
   theme(axis.text = element_blank(),
         axis.ticks = element_blank())
-```
 
-```{r}
 anacapa_map
 ```
 
+# GFW Anchorages
+
+Check for any existing GFW anchorages near the Channel Islands. Some of these probably represent harbors or ports and we wouldn't want to accidentally consider these as dive sites if vessels spend longer periods of time here.  
+
+Main ports by Island: 
+ - San Miguel: Cuyler Harbor  
+ - Santa Rosa: Bechers Bay  
+ - Santa Cruz: Prisoners Harbor and Scorpion  
+ - Anacapa: East End Landing Cove  
+ - Santa Barbara: Landing Cove  
+ - Catalina: Two Harbors and Avalon  
+ - San Clemente: Wilson Cove and Pyramid Cove  
+<br>   
+```{r query-anchorages, include=F}
+sql_anchorages <- "#StandardSQL
+  SELECT 
+    *
+  FROM 
+    `world-fishing-827.anchorages.named_anchorages_v20211026` 
+  WHERE (lon >= -121 AND lon <= -118)
+  AND (lat >= 32.5 AND lat <= 34.5)"
+
+anchorages <- bq_project_query("emlab-gcp",
+                               sql_anchorages) %>% 
+  bq_table_download(n_max = Inf)
+```
+
+```{r identify-harbors}
+island_anchorages <- anchorages %>% 
+  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
+                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
+                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
+                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
+                      'WILSON COVE')) %>% 
+  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
+  filter(s2id != '80e8f09d' & s2id != '80eea361') %>% 
+  mutate(label = ifelse(label == 'ANACAPA ISL', 'SMUGGLERS COVE', label)) %>% 
+  # Enter lat/lon for Anacapa landing since this one is incorrect
+  bind_rows(data.frame(lat = 34.016622594287405, 
+                       lon = -119.36198187585457,
+                       label = 'ANACAPA'))
+
+# Clean up anchorages dataset 
+island_anchorages_clean <- island_anchorages %>% 
+  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
+  mutate(label = case_when(s2id == '80e8fa5b' | s2id == '80e8fa45' ~ 'SANTA CRUZ ISLAND', 
+                           label == 'ANACAPA' ~ 'ANACAPA',
+                           TRUE ~ label)) %>% 
+  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
+                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
+                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
+                                      label == 'ANACAPA' ~ "Anacapa",
+                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
+                                      label == 'AVALON' | label == 'CATALINA IS' | 
+                                      label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
+                                      label == 'ISTHMUS COVE' ~ "Catalina",
+                                      TRUE ~ 'Santa Cruz'),
+         # Try and label the harbors 
+         harbor = case_when(label == 'SANTA ROSA IS' ~ 'Bechers Bay',
+                            label == 'SAN MIGUEL IS' ~ 'Cuyler Harbor',
+                            label == 'ANACAPA' ~ 'East End Landing Cove',
+                            label == 'SANTA BARBARA ISLAND' ~ 'Landing Cove',
+                            label == 'AVALON' ~ 'Avalon',
+                            label == 'ISTHMUS COVE' ~ 'Two Harbors',
+                            label == 'WILSON COVE' ~ 'Wilson Cove', 
+                            label == 'SAN DIEGO' ~ 'Pyramid Cove',
+                            label == 'PRISONERS' ~ 'Prisoners Harbor', 
+                            label == 'SCORPION ANCH' ~ 'Scorpion Anchorage',
+                            s2id %in% c('80e8fa5b', '80e8fa45') ~ 'Scorpion Anchorage',
+                            TRUE ~ 'Other'),
+         lat_bin = floor(lat * 1000) / 1000 + 0.0005,
+         lon_bin = floor(lon * 1000) / 1000 + 0.0005) %>% 
+  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
+                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
+                unique_active_ssvid, unique_total_ssvid, harbor, lat_bin, lon_bin)
+
+# Check on map 
+island_anchorages_clean %>% 
+  filter(harbor != 'Other') %>% 
+  ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(aes(x=lon, y=lat, color = harbor), alpha = 0.6) +
+  labs(x = "",
+       y = "",
+       color = '') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+Only 6 of the identified dive sites (at any time or site threshold) overlapped with known anchorages at the main harbor on Anacapa, Santa Rosa, and Santa Barbara islands, as well as 3 anchorages in Prisoners Harbor and 1 in Scorpion Bay on Santa Cruz island.    
+
+```{r site-harbor-overlap, include=F}
+# Unique dive sites regardless of time or site thresholds
+unique_sites <- compare_sites_filtered %>% 
+  dplyr::select(lat_bin, lon_bin) %>% 
+  distinct() %>% 
+  mutate(id = 'AIS dive site') #260 sites
+
+harbor_overlap <- unique_sites %>% 
+  left_join(island_anchorages_clean %>% 
+              dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 6 sites 
+  mutate(id = ifelse(!is.na(harbor), 'Harbor', id))
+```
+
+
+ 
