@@ -289,16 +289,16 @@ ggplot(compare_totals) +
 
 ## Compare Sites 
 
-The next step is to count the number of "visits" or "dives" in each grid cell. We then consider any grid cell with at least `x` dives to be a dive site. We test this threshold of `x` at 5, 10, 15, 20, and 25 dives per year. 
+The next step is to count the number of "visits" or "dives" in each grid cell. We then consider any grid cell with at least `x` dives to be a dive site. We test this threshold of `x` at 10, 15, 20, 25, and 30 dives per year. 
 
-We also test this range of `x` for every time threshold from 45 minutes to 2 hours. For example the least restrictive option identifies a "visit" as any time a vessel spends at least 45 minutes in a grid cell and 5 dives per year have to occur a grid cell in order for it to be considered as a dive site. The most restrictive option identifies a "visit" as any time a vessel spends at least 2 hours in a grid cell and 25 dives per year have to occur in a grid cell in order for it to be considered a dive site.  
+We also test this range of `x` for every time threshold from 45 minutes to 2 hours. For example the least restrictive option identifies a "visit" as any time a vessel spends at least 45 minutes in a grid cell and 10 dives per year have to occur a grid cell in order for it to be considered as a dive site. The most restrictive option identifies a "visit" as any time a vessel spends at least 2 hours in a grid cell and 30 dives per year have to occur in a grid cell in order for it to be considered a dive site.  
 
-The graph below shows the number of grid cells considered as dive sites for each combination of the "visit" time threshold (i.e. 45 minutes to 2 hours) and the number of dives threshold (i.e. 5 to 25 dives).    
+The graph below shows the number of grid cells considered as dive sites for each combination of the "visit" time threshold (i.e. 45 minutes to 2 hours) and the number of dives threshold (i.e. 10 to 30 dives).    
 <br>  
 
 ```{r compare-sites}
 # Number of dives to be considered a dive site
-site_threshold <- seq(10,50,10)
+site_threshold <- seq(10,30,5)
 
 compare_sites  <- NULL
 
@@ -344,7 +344,7 @@ ggplot(data = sites_by_threshold) +
 
 The maps below identify what dive sites are added as the time threshold decreases. It first identifies grid cells considered as "dive sites" if the time spent in a grid cell is at least 2 hours. It then looks at what new grid cells are added if the time spent in a grid cell decreases to 1 hour and 45 minutes, etc. 
 
-There is a different map for each of the site thresholds (i.e. 10 dives per year, 20 dives per year, etc.)
+There is a different map for each of the site thresholds (i.e. 10 dives per year, 15 dives per year, etc.)
 
 ```{r map-dive-sites}
 # Identify the coastal sites that aren't in the CI 
@@ -401,6 +401,23 @@ for(i in site_threshold){
   print(site_map)
 }
 ```
+
+For now we move forward with the following parameters:  
+ - Time threshold: 1 hour, 15 minutes  
+ - Site threshold: 15 vessels   
+ 
+```{r save-dive-sites, include=F}
+dive_sites <- compare_sites_filtered %>% 
+  filter(time_thresh == 1.25 & site_threshold == 15 & dive_site == 1) %>% 
+  dplyr::select(lat_bin, lon_bin) %>% 
+  distinct() %>% 
+  arrange(lat_bin, lon_bin) %>% 
+  mutate(site_id = 1:nrow(.))
+
+# Save
+#write_csv(dive_sites, file.path(project_data_path, "processed", "dive_sites_1hr15min_15vessels.csv"))
+```
+
 
 # Compare Sites
 
