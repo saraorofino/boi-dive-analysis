@@ -132,39 +132,52 @@ ci_mpas <- mpa_atlas %>%
                        'Farnsworth Onshore (Catalina Island)',
                        "Lover's Cove (Catalina Island)",
                        'Long Point (Catalina Island)',
-                       'Santa Barbara Island')) %>% 
-  dplyr::mutate(protection = ifelse(name %in% c('Channel Islands', 'Farnsworth Onshore (Catalina Island)',
-                                                      'Farnsworth Offshore (Catalina Island)',
-                                                      'Cat Harbor (Catalina Island)',
-                                                      'Arrow Point to Lion Head Point (Catalina Island)',
-                                                      "Lover's Cove (Catalina Island)",
-                                                      'Blue Cavern (Catalina Island) Offshore'), 
-                                          'Less Protected/Unknown',
-                                          'Fully/Highly Protected')) %>% 
+                       'Santa Barbara Island',
+                       'Painted Cave (Santa Cruz Island)')) %>% 
+  dplyr::mutate(gov_type = ifelse(is.na(gov_type), "Federal", gov_type)) %>% 
   dplyr::select(mpa_id, name, mpa_type = designatio, status, status_yr = status_yea, 
-                no_take, protection, fishing, area_km2 = calc_m_are)
+                gov_type, no_take, fishing, area_km2 = calc_m_are) %>% 
+  # Remove the "special closure" area, "fish habitat area" 
+  filter(!mpa_id %in% c(7606, 8670))
 
 # CI polygons
-ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp")) %>% 
+  filter(poly_id != 'San Clemente')
 
 # Plot to check 
-ci_less <- ci_mpas %>% 
-  filter(protection == 'Less Protected/Unknown')
+ci_fed <- ci_mpas %>% 
+  filter(gov_type == 'Federal' & mpa_id != 8688) 
 
-ci_high <- ci_mpas %>% 
-  filter(protection == 'Fully/Highly Protected')
+ci_nms <- ci_mpas %>% 
+  filter(mpa_id == 8688)
 
-ggplot() + 
+ci_state <- ci_mpas %>% 
+  filter(gov_type == 'State')
+
+mpa_map <- ggplot() + 
   geom_sf(data = ci_polys, fill = NA, color = 'black') + 
-  geom_sf(data = ci_less, aes(fill = protection), alpha = 0.4) + 
-  geom_sf(data = ci_high, aes(fill = protection), alpha = 0.6) + 
-  scale_fill_manual(breaks = c('Fully/Highly Protected', 'Less Protected/Unknown'),
-                    values = c('midnightblue', 'forestgreen')) + 
-  theme_bw()
+  geom_sf(data = ci_nms, fill = NA, aes(color = mpa_type)) + 
+  geom_sf(data = ci_fed, aes(fill = mpa_type), alpha = 0.4) + 
+  geom_sf(data = ci_state, aes(fill = mpa_type), alpha = 0.6) + 
+  scale_fill_manual(values = c('slategray3', 'tomato', 'darkcyan', 'firebrick')) +
+  scale_color_manual(values = c('midnightblue')) + 
+  labs(color = "",
+       fill = 'Type') + 
+  theme_bw() + 
+  # move color legend under the fill legend 
+  guides(color = guide_legend(order = 2),
+         fill = guide_legend(order = 1, nrow = 2)) +
+  theme(legend.margin=margin(0,0,0,0, unit="cm"),
+        legend.position = 'bottom')
 ```
+
+
 ```{r save-mpas}
 # Save the mpa shapefile to project folder
 st_write(ci_mpas, file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+
+# Save map 
+ggsave(plot = mpa_map, filename = file.path(project_figure_path, "mpa_map.png"))
 ```
 
 
