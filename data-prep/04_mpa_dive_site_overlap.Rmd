@@ -29,7 +29,7 @@ library(paletteer)
 source(file.path(here::here(),"common.R"))
 
 # Dive sites
-dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr15min_15vessels.csv"))
+dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr_1vessel.csv"))
 
 # Vessel info 
 vessel_info <- read_csv(file.path(project_data_path, "processed", "ais_vessel_list.csv"))
@@ -49,18 +49,23 @@ mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel
 
 ## Overview 
 
-In this document we look at the overlap of dive sites and MPAs. We are counting a dive site as any grid cell with at least 15 visits, where a visit is defined as a dive boat that has remained stationary in that grid cell for at least 1.25 hours on a given day. We first filter AIS positions for only those occurring during the day and we define stationary as any position where the vessel moves slower than 1 knot.   
+In this document we look at the overlap of dive sites and MPAs. We are counting a dive site as any grid cell with at least 1 visits, where a visit is defined as a dive boat that has remained stationary in that grid cell for at least 1 hours on a given day. We first filter AIS positions for only those occurring during the day and we define stationary as any position where the vessel moves slower than 1 knot.   
 
 The following steps are used to quantify dive site and MPA overlap:   
 
   - Buffer MPAS: create a 500 meter buffer around each MPA site 
   - Classify Dive Sites: categorize each dive site as being within a MPA, within a buffer, or outside a MPA  
-  - Count Dives: Look at all AIS positions during the day where vessels move slower than 1 knot, count a "dive" as any time the vessel remains stationary in one of the identified dive site grid cells for at least 1 hour and 15 minutes.  
+  - Count Dives: Look at all AIS positions during the day where vessels move slower than 1 knot, count a "dive" as any time the vessel remains stationary in one of the identified dive site grid cells for at least 1 hour.  
   - Compare MPA Dives: determine the number of dives within MPAs, within MPA buffers, and outside of MPAs  
 
 ## Buffer MPAs
 
-Map of Channel Islands MPAs based on the 2020 MPA Atlas. For determining if dive sites are within an MPA, we look at just MPAs that are fully no take.  
+Map of Channel Islands MPAs based on the 2020 MPA Atlas. For determining if dive sites are within an MPA, we look at just MPAs that are fully no take (24 of the 33 MPA areas). The following areas are considered fully no take: 
+
+  - State Marine Reserves (all 13)  
+  - State Marine Conservation Areas (2 of 10; both on Catalina Island)  
+  - Federal Marine Reserve (all 8)  
+  - Federal Marine Conservation Area (1 of 1; Anacapa Island)  
 
 ```{r mpa-map}
 # Separate by no take designation 
@@ -77,6 +82,9 @@ ggplot() +
   geom_sf(data = mpa_all, aes(fill = no_take), alpha = 0.6) + 
   scale_fill_manual(breaks = c('All', 'None/Not Reported'),
                     values = c('forestgreen', 'goldenrod')) + 
+  labs(fill = "No Take Designation",
+       x="",
+       y="") + 
   theme_bw()
 ```
 
@@ -90,7 +98,7 @@ mpa_buff_boundary  <- rmapshaper::ms_erase(mpa_buff, mpa_all)
 
 ## Classify Dive Sites
 
-We classify each of the 115 dive sites as being within a MPA, within a buffer, or outside a MPA. The graph shows the fraction of dive sites within each category. Dive sites are also mapped relative to MPAs which are colored by their no take designation in the MPA Atlas.   
+We classify each of the 3,199 dive sites as being within a MPA, within a buffer, or outside a MPA. The graph shows the fraction of dive sites within each category. Dive sites are also mapped relative to MPAs which are colored by their no take designation in the MPA Atlas.   
 
 ```{r classify-dive-sites, echo=F}
 # Crs of mpa shp 
@@ -102,10 +110,10 @@ dive_sites_sf <- st_as_sf(dive_sites,
                           crs = target_crs)
 
 # Dive sites within the MPA boundary 
-sites_in_mpa <- st_intersection(dive_sites_sf, mpa_all) #37 unique sites 
+sites_in_mpa <- st_intersection(dive_sites_sf, mpa_all) #379 unique sites 
 
 # Dive sites within the buffer 
-sites_in_buffer <- st_intersection(dive_sites_sf, mpa_buff_boundary) #21 unique sites
+sites_in_buffer <- st_intersection(dive_sites_sf, mpa_buff_boundary) #249 unique sites
 
 # Combine 
 dive_site_categories <- sites_in_mpa %>% 
@@ -116,7 +124,7 @@ dive_site_categories <- sites_in_mpa %>%
 # What sites aren't in MPAs or the buffer?
 ids <- dive_site_categories$site_id
 
-missing_ids <- setdiff(dive_sites$site_id, ids) #57 outside 
+missing_ids <- setdiff(dive_sites$site_id, ids) #2,571 outside 
 
 outside <- dive_sites_sf %>% 
   filter(site_id %in% missing_ids) %>% 
@@ -124,7 +132,7 @@ outside <- dive_sites_sf %>%
 
 # Add missing to the list 
 all_site_categories <- dive_site_categories %>% 
-  dplyr::select(site_id, site_category, mpa_id, name, mpa_type, mpa_year = status_yr) %>% 
+  dplyr::select(site_id, site_type, site_category, mpa_id, name, mpa_type, mpa_year = status_yr) %>% 
   bind_rows(outside) %>% 
   arrange(site_id)
 
@@ -154,8 +162,8 @@ ggplot(sites_by_cat) +
                    breaks = c("in_buffer", "in_mpa", "outside_mpa"),
                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
   scale_y_continuous(expand = c(0,0),
-                     limits = c(0,60),
-                     breaks = seq(0,60,20)) +
+                     limits = c(0,2800),
+                     breaks = seq(0,2500,500)) +
   labs(y = 'Number of Dive Sites',
        x = 'Dive Site Category') + 
   theme_bw()
@@ -216,25 +224,29 @@ ais_locations <- bq_project_query("emlab-gcp", sql_ais_locations) %>%
 #write_csv(ais_locations, file.path(project_data_path, "processed", "ais_stationary_day_positions_2016_2021.csv"))
 ```
 
-We count dives from AIS positions using only positions during the day where vessels are moving slower than 1 knot and remain stationary within an identified "dive site" cell for at least 1 hour and 15 minutes. 
+We count dives from AIS positions using only positions during the day where vessels are moving slower than 1 knot and remain stationary within an identified "dive site" cell for at least 1 hour. 
 
 ### Dives by Year
 
-The total number of dives by year aggregated across all vessels is shown in the first plot and the number of dives by year for each vessel is shown in the second plot. We see an (expected) decline in dive activity from 2019-2020. Some vessels (e.g. Raptor, MV Horizon) remain relatively consistent in the number of dives per year while others (e.g. Spectre, MV Islander, Truth) exhibit strong variability over the years. The decline from 2019-2020 is noticeable for most vessels but it's also really significant for a few including the Spectre and the MV Islander.     
+The total number of dives by year aggregated across all vessels is shown in the first plot and the number of dives by year for each vessel is shown in the second plot. We see an (expected) decline in dive activity from 2019-2020. This plot is reflective of dives from only those vessels who have responded to the survey so far: Spectre, Peace, Raptor, and Vision.         
 
 ```{r count-dives, include=F}
 ais_positions <- read_csv(file.path(project_data_path, "processed", "ais_stationary_day_positions_2016_2021.csv"))
 
-# Filter positions where hours > 1.25
+# Filter positions where hours > 1
 # Join to dive site locations
 ais_dives <- ais_positions %>% 
-  filter(total_hours >= 1.25) %>% 
-  inner_join(dive_sites, by = c("lat_bin", "lon_bin"))
+  filter(total_hours >= 1) %>% 
+  inner_join(dive_sites, by = c("lat_bin", "lon_bin")) %>% 
+  left_join(vessel_info %>% 
+              dplyr::select(ssvid, shipname),
+            by = "ssvid") %>% 
+  filter(shipname %in% c("Spectre", "Peace", "Raptor", "Vision"))
 
 ## Join to MPA info 
 # Join site locations to MPA category
 ais_mpa_dives <- ais_dives %>% 
-  left_join(all_site_categories, by = "site_id") # Note some sites are in two MPAs
+  left_join(all_site_categories, by = "site_id") 
 ```
 
 ```{r dives-year}
@@ -251,31 +263,32 @@ ggplot(dives_per_year) +
            alpha = 0.95) + 
   scale_x_continuous(expand = c(0,0)) + 
   scale_y_continuous(expand = c(0,0),
-                     limits = c(0,1000),
-                     breaks = seq(0,1000,200)) +
-  labs(y = 'Number of Dives',
+                     limits = c(0,1200),
+                     breaks = seq(0,1200,300)) +
+  labs(y = 'Number of Dives (all vessels)',
        x = 'Year') + 
   theme_bw()
 ```
 
 <br>  
+
+For now, we're just looking at the four vessels who have responded to the survey: Spectre, Peace, Raptor, and Vision. 
+
 ```{r dives-vessel-year, echo=F}
 # Dives per vessel per year (not by MPA)
 dives_per_vessel_year <- ais_dives %>% 
   mutate(year = lubridate::year(date)) %>% 
   group_by(ssvid, year) %>% 
   summarize(n_dives = n()) %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname),
-            by = "ssvid")
+  ungroup()
 
 ggplot(dives_per_vessel_year) +
   geom_point(aes(x=year, y=n_dives, color=shipname)) + 
   geom_line(aes(x=year, y=n_dives, color=shipname, group=shipname)) + 
   scale_x_continuous(expand = c(0.01,0.01)) + 
   scale_y_continuous(expand = c(0.01,0),
-                     limits = c(1,300),
-                     breaks = seq(0,300,100)) + 
+                     limits = c(1,400),
+                     breaks = seq(0,400,100)) + 
   labs(x = "Year", 
        y = "Number of Dives",
        color = "Shipname") + 
@@ -284,7 +297,7 @@ ggplot(dives_per_vessel_year) +
 
 ### Sites by Year
 
-The number of unique dive sites visited each year on the whole was increasing slightly each year, with a noticeable decline from 2019-2020 and continues to increase from 2020 to 2021. However, the number of unique sites visited by each vessel is highly variable for many of the vessels. The MV Islander is the only vessel that appears to exhibit relatively consistency in the number of unique sites visited across the years despite showing a large variability in the number of dives per year. The other vessels all seem to show a lot of variation, some of which may be related to changes in the number of dives but not necessarily.  
+The number of unique dive sites visited each year on the whole was increasing slightly each year, with a noticeable decline from 2019-2020 and continues to increase from 2020 to 2021. These numbers are reflective of all vessels, while the by vessel and year will look at only those vessels who have responded to the survey so far: Spectre, Peace, Raptor, and Vision.   
 <br>  
 
 ```{r unique-sites-per-year, echo=F}
@@ -303,8 +316,8 @@ ggplot(sites_per_year) +
            alpha = 0.95) + 
   scale_x_continuous(expand = c(0,0)) + 
   scale_y_continuous(expand = c(0,0),
-                     limits = c(0,120),
-                     breaks = seq(0,120,40)) +
+                     limits = c(0,570),
+                     breaks = seq(0,550,50)) +
   labs(y = 'Number of Unique Dive Sites',
        x = 'Year') + 
   theme_bw()
@@ -319,18 +332,15 @@ sites_per_vessel_year <- ais_dives %>%
   distinct() %>% 
   group_by(ssvid, year) %>% 
   summarize(n_unique_sites = n()) %>% 
-  ungroup() %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname),
-            by = "ssvid")
+  ungroup()
 
 ggplot(sites_per_vessel_year) +
   geom_point(aes(x=year, y=n_unique_sites, color=shipname)) + 
   geom_line(aes(x=year, y=n_unique_sites, color=shipname, group=shipname)) + 
   scale_x_continuous(expand = c(0.01,0.01)) + 
   scale_y_continuous(expand = c(0.01,0),
-                     limits = c(0,40),
-                     breaks = seq(0,40,10)) + 
+                     limits = c(0,275),
+                     breaks = seq(0,250,50)) + 
   labs(x = "Year", 
        y = "Number of Unique Sites Visited",
        color = "Shipname") + 
@@ -341,7 +351,7 @@ ggplot(sites_per_vessel_year) +
 
 ### Aggregate 
 
-The first plot shows the proportion of total dives by all vessels within each of the site classifications. On the whole, this indicates that more than half of the dives each year occur in MPAs or within an MPA buffer (500 meters). In each year the fraction of dives in MPAs is larger than any other classification, however, it seems that proportion of dives in MPAs is declining in each year from 0.63 in 2016 to 0.46 in 2021.      
+The first plot shows the proportion of total dives by all vessels within each of the site classifications. Again, this is just looking at the four vessels which have responded to the survey so far. On the whole, this indicates that roughly twice as many dives happen outside of MPAs than inside MPAs and MPA buffers. But there are also many more dive sites identified outside of MPAs.  
 
 ```{r overall-dives-by-category, echo=F}
 # Overall fraction of dives by category 
@@ -378,25 +388,22 @@ ggplot(annual_dive_summary) +
 
 ### By Vessel
 
-The next three graphs show the breakdown of dives by site category for each vessel. The first two are aggregated as total dives from 2016-2021 displayed both as a relative proportion and as an absolute number. More than half of the vessels (7 of 12) seem to dive more frequently outside of MPAs than inside. However, the vessels that dive more often in MPAs (notably the MV Islander and Spectre) have significantly more dives in a given year than the other vessels which is likely driving the prior results of overall proportion of dives in MPAs being higher than outside of MPAs.  
+The next three graphs show the breakdown of dives by site category for each vessel. The first two are aggregated as total dives from 2016-2021 displayed both as a relative proportion and as an absolute number. Two of the vessels seem to dive about 50/50 inside and outside MPAs while the other two are predominantly diving outside of MPAs. 
 
-The final graph is the breakdown of sites by category for each vessel in each year. Again it seems like some vessels more consistently visit MPAs (e.g. Raptor, Spectre, Sunfish) or remain outside MPAs (e.g. Truth, Vision, Horizon) in every year while others fluctuate from year to year (e.g. MV Islander, Pacific Star, Peace).  
+The final graph is the breakdown of sites by category for each vessel in each year. 
 
 ```{r prop-vessel-dives-by-category, echo=F}
 # Fraction of dives by category and vessel
 dives_by_category <- ais_mpa_dives %>% 
-  dplyr::select(ssvid, date, site_id, site_category) %>% 
+  dplyr::select(ssvid, shipname, date, site_id, site_category) %>% 
   distinct() %>% # Remove any dives classified as being at two MPAs 
-  group_by(ssvid) %>% 
+  group_by(ssvid, shipname) %>% 
   mutate(n_total_dives = n()) %>% 
   ungroup() %>% 
-  group_by(ssvid, n_total_dives, site_category) %>%
+  group_by(ssvid, shipname, n_total_dives, site_category) %>%
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(frac_of_total = n_dives / n_total_dives) %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname),
-            by = "ssvid")
+  mutate(frac_of_total = n_dives / n_total_dives)
 
 ggplot(dives_by_category) + 
   geom_col(aes(x=frac_of_total, y=fct_rev(factor(shipname)), fill = site_category)) +
@@ -415,8 +422,8 @@ ggplot(dives_by_category) +
   geom_col(aes(x=n_dives, y=fct_rev(factor(shipname)), fill = site_category)) +
   scale_y_discrete(expand = c(0,0)) + 
   scale_x_continuous(expand = c(0,0),
-                     limits = c(0,1200),
-                     breaks = seq(0,1200,300)) + 
+                     limits = c(0,1800),
+                     breaks = seq(0,1800,600)) + 
   scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
                     labels = c("In Buffer", "In MPA", "Outside MPA")) + 
   labs(y = "Shipname",
@@ -428,19 +435,16 @@ ggplot(dives_by_category) +
 ```{r dives-category-overtime, echo=F}
 # Dives by category per year
 annual_dives_by_category <- ais_mpa_dives %>% 
-  dplyr::select(ssvid, date, site_id, site_category) %>% 
+  dplyr::select(ssvid, shipname, date, site_id, site_category) %>% 
   distinct() %>% # Remove any dives classified as being at two MPAs 
   mutate(year = lubridate::year(date)) %>% 
-  group_by(ssvid, year) %>% 
+  group_by(ssvid, shipname, year) %>% 
   mutate(n_annual_dives = n()) %>% 
   ungroup() %>% 
-  group_by(ssvid, year, n_annual_dives, site_category) %>%
+  group_by(ssvid, shipname, year, n_annual_dives, site_category) %>%
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(frac_of_total = n_dives / n_annual_dives) %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname),
-            by = "ssvid")
+  mutate(frac_of_total = n_dives / n_annual_dives) 
 
 ggplot(annual_dives_by_category) + 
   geom_col(aes(x=frac_of_total, y=fct_rev(factor(shipname)), fill = site_category)) +

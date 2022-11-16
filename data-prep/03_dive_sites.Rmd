@@ -181,7 +181,7 @@ Converting these dive site locations into 0.001 x 0.001 degree grids there are n
 The following approach is used to try and determine dive site locations.  
 
   - Bin coordinates to a high resolution (0.001 degrees, ~ 111 km)  
-  - Identify instances where dive vessels remain stationary in a grid cell for a minimum amount of time, testing different time thresholds from 45 minutes to 2 hours  
+  - Identify instances where dive vessels remain stationary in a grid cell for a minimum amount of time, based on survey results this time threshold is 1.5 hours (90 minutes)   
   - Count the number of stationary instances, "dives", in each grid cell   
   - Identify the cells with a number of "dives" above some threshold - these are the dive sites  
 
@@ -242,63 +242,63 @@ ggplot(binned_locations, aes(x=total_hours)) +
 ```
 <br>  
 
-The first step is to identify grid cells "visited" by dive vessels, we consider a grid cell "visited" if a dive vessel remains stationary for at least a certain amount of time. We will test this time threshold at 15 minute increments from 45 minutes to 2 hours. This threshold indicates the minimum amount of time a vessel must remain in a grid cell to count it as 'visited', e.g. a visit is any instance where a vessel remains stationary within a grid cell for at least 45 minutes vs. where a vessel remains stationary for at least 2 hours.    
-
-The graph below identifies the number of distinct grid cells with "visits" for each time threshold. 
+The first step is to identify grid cells "visited" by dive vessels, we consider a grid cell "visited" if a dive vessel remains stationary for at least a certain amount of time. Based on survey results from dive operators, most vessels spend about 1.5 hours at a dive site. We'll compare using a cutoff of 1 hour vs. a cutoff of 1.5 hours to see if it makes a difference for capturing dives that might be shorter than the average.   
 <br>  
 
 ```{r test-thresholds}
-# Number of dives using different time thresholds 
-time_thresh <- seq(0.75, 2, 0.25)
+## If testing a range
+time_thresh <- c(1,1.5)
 
 possible_sites <- NULL
 
 for(i in time_thresh){
-  
-  possible_sites <- possible_sites %>% 
-    bind_rows(binned_locations %>% 
-                mutate(time_threshold = i) %>% 
+
+  possible_sites <- possible_sites %>%
+    bind_rows(binned_locations %>%
+                mutate(time_threshold = i) %>%
                 mutate(dive = ifelse(total_hours >= time_threshold, 1, 0)))
 }
 
-# Number of dives in each grid cell 
-compare_dives <- possible_sites %>% 
-  group_by(lat_bin, lon_bin, time_threshold) %>% 
+# Number of dives in each grid cell
+compare_dives <- possible_sites %>%
+  group_by(lat_bin, lon_bin, time_threshold) %>%
   dplyr::summarize(dives = sum(dive))
 
-# Totals by threshold 
-compare_totals <- compare_dives %>% 
-  mutate(has_dives = ifelse(dives > 0 , 'yes', 'no')) %>% 
-  filter(has_dives == 'yes') %>% 
-  group_by(time_threshold) %>% 
-  dplyr::summarize(n_cells = n()) %>% 
-  mutate(diff_cells = c(0, diff(n_cells)))
+# Totals by threshold
+compare_totals <- compare_dives %>%
+  mutate(has_dives = ifelse(dives > 0 , 'yes', 'no')) %>%
+  filter(has_dives == 'yes') %>%
+  group_by(time_threshold) %>%
+  dplyr::summarize(n_cells = n()) %>%
+  mutate(diff_cells = c(0, diff(n_cells))) %>% 
+  ungroup() %>% 
+  mutate(time_threshold = factor(time_threshold))
 
-ggplot(compare_totals) + 
+ggplot(compare_totals) +
   geom_col(aes(x=time_threshold, y=n_cells),
            fill = 'slategrey',
-           alpha = 0.95) + 
+           alpha = 0.95) +
   labs(x='Time Threshold',
-       y='Number of unique grid cells "visited" by dive boats') + 
-  scale_x_continuous(expand = c(0,0),
-                     breaks = seq(0.75,2,0.25),
-                     labels = c('45 min', '1 hr', '1 hr 15 min', '1 hr 30 min', '1 hr 45 min', '2 hrs')) + 
+       y='Number of unique grid cells "visited" by dive boats') +
+  scale_x_discrete(expand = c(0,0),
+                   breaks = c(1,1.5),
+                     labels = c('1 hr', '1 hr 30 min')) +
   scale_y_continuous(expand = c(0,0)) +
   theme_bw()
 ```
 
 ## Compare Sites 
 
-The next step is to count the number of "visits" or "dives" in each grid cell. We then consider any grid cell with at least `x` dives to be a dive site. We test this threshold of `x` at 10, 15, 20, 25, and 30 dives per year. 
+The next step is to count the number of "visits" or "dives" in each grid cell. We then consider any grid cell with at least `x` dives to be a dive site. We test this threshold of `x` at 1, 2, 3, 4, and 5 dives per year. 
 
-We also test this range of `x` for every time threshold from 45 minutes to 2 hours. For example the least restrictive option identifies a "visit" as any time a vessel spends at least 45 minutes in a grid cell and 10 dives per year have to occur a grid cell in order for it to be considered as a dive site. The most restrictive option identifies a "visit" as any time a vessel spends at least 2 hours in a grid cell and 30 dives per year have to occur in a grid cell in order for it to be considered a dive site.  
+We also test this range of `x` for the 60 minute and 90 minute thresholds. The least restrictive option identifies a "visit" as any time a vessel spends at least 1 hour in a grid cell and 1 dive per year has to occur a grid cell in order for it to be considered as a dive site. The most restrictive option identifies a "visit" as any time a vessel spends at least 1.5 hours in a grid cell and 5 dives per year have to occur in a grid cell in order for it to be considered a dive site. 
 
-The graph below shows the number of grid cells considered as dive sites for each combination of the "visit" time threshold (i.e. 45 minutes to 2 hours) and the number of dives threshold (i.e. 10 to 30 dives).    
+The graph below shows the number of grid cells considered as dive sites for each combination of the "visit" time threshold (i.e. 60 or 90 minutes) and the number of dives threshold (i.e. 1 dive or 5 dives).    
 <br>  
 
 ```{r compare-sites}
 # Number of dives to be considered a dive site
-site_threshold <- seq(10,30,5)
+site_threshold <- seq(1,5,1)
 
 compare_sites  <- NULL
 
@@ -323,51 +323,53 @@ sites_by_threshold <- compare_sites %>%
   group_by(time_threshold, site_threshold) %>% 
   summarize(n_sites = sum(dive_site)) %>% 
   ungroup() %>% 
-  mutate(time_threshold = factor(time_threshold)) 
+  mutate(site_threshold = factor(site_threshold),
+         time_threshold = factor(time_threshold)) 
 
 
 ggplot(data = sites_by_threshold) + 
   geom_col(aes(x= site_threshold, y = n_sites, fill = time_threshold),
            position = 'dodge') +
-  scale_fill_manual(values = paletteer::paletteer_d("nationalparkcolors::ArcticGates", n=6),
-                    labels = c('45 min', '1 hr', '1 hr 15 min', '1 hr 30 min', '1 hr 45 min', '2 hrs')) + 
+  scale_fill_manual(values = paletteer::paletteer_d("nationalparkcolors::ArcticGates", n=2),
+                    labels = c('1 hr', '1 hr 30 min')) +
   labs(x="Site threshold (minimum number of 'dives' per year)",
        y="Number of dive sites",
        fill = "Time threshold") + 
-  scale_x_continuous(expand = c(0,0),
-                     breaks = seq(10,50,10)) + 
+  scale_x_discrete(expand = c(0,0),
+                   breaks = seq(1,5,1)) + 
   scale_y_continuous(expand = c(0,0)) +
   theme_bw()
 ```
 
 ## Site Maps
 
-The maps below identify what dive sites are added as the time threshold decreases. It first identifies grid cells considered as "dive sites" if the time spent in a grid cell is at least 2 hours. It then looks at what new grid cells are added if the time spent in a grid cell decreases to 1 hour and 45 minutes, etc. 
+The maps below identify what dive sites are added as the time threshold decreases. It first identifies grid cells considered as "dive sites" if the time spent in a grid cell is at least 1.5 hours. It then looks at what new grid cells are added if the time spent in a grid cell decreases to 1 hour. 
 
-There is a different map for each of the site thresholds (i.e. 10 dives per year, 15 dives per year, etc.)
+There is a different map for each of the three site thresholds (i.e. 1, 3, or 5 dives)  
 
 ```{r map-dive-sites}
 # Identify the coastal sites that aren't in the CI 
 coastal_sites <- compare_sites %>%
-  filter(site_threshold == 10) %>% 
-  mutate(coastal_site = case_when(lat_bin > 34.1 ~ 'yes',
+  filter(site_threshold == 1) %>% 
+  mutate(coastal_site = case_when(lat_bin > 34.1115 & lon_bin > -120 ~ 'yes',
+                                  lat_bin > 34.25 & lon_bin < -120 ~ 'yes',
                                   lat_bin == 33.7235 ~ 'yes',
                                   lat_bin == 33.7245 ~ 'yes',
+                                  lat_bin > 33.51 & lon_bin > -119 ~ 'yes',
                                   TRUE ~ 'no'))
 
 # Confirm we have the correct sites to remove 
 check_map <- ggplot() + 
     geom_sf(data = ca_counties, fill = NA) + 
     geom_sf(data = ci_shp, fill = NA) + 
-    geom_point(data = coastal_sites,
-               aes(x=lon_bin, y=lat_bin, color = coastal_site)) # Looks good 
+    geom_point(data = coastal_sites, aes(x=lon_bin, y=lat_bin, color = coastal_site)) 
     
 # Remove the sites that look like they're coastal and not in the CI 
 compare_sites_filtered <- compare_sites %>% 
-  mutate(coastal_site = case_when(lat_bin > 34.1 ~ 'yes',
-                                  lat_bin == 33.7235 ~ 'yes',
-                                  lat_bin == 33.7245 ~ 'yes',
-                                  TRUE ~ 'no')) %>% 
+  left_join(coastal_sites) %>% 
+  filter(coastal_site != 'yes') %>% 
+  # Fix a couple that were missed 
+  mutate(coastal_site = ifelse((lon_bin < -119 & lon_bin >= -119.3015) & lat_bin > 34.0385, 'yes', coastal_site)) %>% 
   filter(coastal_site != 'yes') %>% 
   dplyr::select(-coastal_site)
   
@@ -387,8 +389,8 @@ for(i in site_threshold){
     geom_sf(data = ci_shp, fill = NA) + 
     geom_point(data = site_cutoff,
                aes(x=lon_bin, y=lat_bin, color=time_threshold)) + 
-    scale_color_manual(values = paletteer::paletteer_d("nationalparkcolors::ArcticGates", n=6),
-                       labels = c('45 min', '1 hr', '1 hr 15 min', '1 hr 30 min', '1 hr 45 min', '2 hrs')) + 
+    scale_color_manual(values = paletteer::paletteer_d("nationalparkcolors::ArcticGates", n=2),
+                       labels = c('1 hr', '1 hr 30 min')) + 
     labs(x="",
          y="",
          title = paste0("Site threshold: ", i, " vessels per year"),
@@ -402,156 +404,19 @@ for(i in site_threshold){
 }
 ```
 
-For now we move forward with the following parameters:  
- - Time threshold: 1 hour, 15 minutes  
- - Site threshold: 15 vessels   
+For now we move forward with the least restrictive set of parameters:  
+ - Time threshold: 1 hour  
+ - Site threshold: 1 vessels   
+ 
+We can always classify sites as most vs. least visited once we look at vessel tracks but we don't want to eliminate sites that might be sites by being too restrictive.  
  
 ```{r save-dive-sites, include=F}
 dive_sites <- compare_sites_filtered %>% 
-  filter(time_thresh == 1.25 & site_threshold == 15 & dive_site == 1) %>% 
+  filter(time_thresh == 1 & site_threshold == 1 & dive_site == 1) %>% 
   dplyr::select(lat_bin, lon_bin) %>% 
   distinct() %>% 
   arrange(lat_bin, lon_bin) %>% 
   mutate(site_id = 1:nrow(.))
-
-# Save
-#write_csv(dive_sites, file.path(project_data_path, "processed", "dive_sites_1hr15min_15vessels.csv"))
-```
-
-
-# Compare Sites
-
-Anacapa island has the largest number of dive sites in the Spotting Giant Sea Bass dataset. We compare the AIS identified dive sites to the SGSB identified dive sites for Anacapa Island in the map below.  
-<br>   
-```{r compare-dive-sites}
-# Bin SGSB sites to 0.001 x 0.001 degrees
-ci_sites_binned <- ci_sites %>% 
-  mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
-         lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
-  dplyr::select(site_name, lat_bin, lon_bin, island)
-
-compare_sgsb <- compare_sites_filtered %>% 
-  dplyr::select(lat_bin, lon_bin) %>% 
-  distinct() %>% 
-  full_join(ci_sites_binned, by = c("lat_bin", "lon_bin")) %>% 
-  mutate(site_source = ifelse(is.na(site_name), 'ais', 'sgsb')) 
-
-## Anacapa 
-anacapa_shp <- ci_shp %>% 
-  filter(poly_id == 'Anacapa')
-
-anacapa_map <- ggplot() + 
-  geom_sf(data = anacapa_shp) + 
-  geom_raster(data = compare_sgsb,
-              aes(x=lon_bin,
-                  y=lat_bin,
-                  fill=site_source)) +
-  scale_fill_manual(values = c('cadetblue', 'firebrick4')) + 
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  coord_sf(xlim = c(-119.45, -119.35),
-           ylim = c(34.000, 34.019)) +
-  labs(x="",
-       y="",
-       fill = "Site Source",
-       title = 'Anacapa Island') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-## Catalina
-catalina_shp <- ci_shp %>% 
-  filter(poly_id == 'Catalina')
-
-catalina_map <- ggplot() + 
-  geom_sf(data = catalina_shp) + 
-  geom_raster(data = compare_sgsb,
-              aes(x=lon_bin,
-                  y=lat_bin,
-                  fill=site_source)) +
-  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  coord_sf(xlim = c(-118.60, -118.31),
-           ylim = c(33.30, 33.48)) +
-  labs(x="",
-       y="",
-       fill = "Site Source",
-       title = 'Catalina Island') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-## San Clemente
-sanclem_shp <- ci_shp %>% 
-  filter(poly_id == 'San Clemente')
-
-sanclem_map <- ggplot() + 
-  geom_sf(data = sanclem_shp) + 
-  geom_raster(data = compare_sgsb,
-              aes(x=lon_bin,
-                  y=lat_bin,
-                  fill=site_source)) +
-  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  coord_sf(xlim = c(-118.61, -118.34),
-           ylim = c(32.8, 33.05)) +
-  labs(x="",
-       y="",
-       fill = "Site Source",
-       title = 'San Clemente Island') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-## Santa Barbara
-santabarb_shp <- ci_shp %>% 
-  filter(poly_id == 'Santa Barbara')
-
-santabarb_map <- ggplot() + 
-  geom_sf(data = santabarb_shp) + 
-  geom_raster(data = compare_sgsb,
-              aes(x=lon_bin,
-                  y=lat_bin,
-                  fill=site_source)) +
-  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  coord_sf(xlim = c(-119.055, -119.025),
-           ylim = c(33.461, 33.490)) +
-  labs(x="",
-       y="",
-       fill = "Site Source",
-       title = 'Santa Barbara Island') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-## Santa Cruz
-santacruz_shp <- ci_shp %>% 
-  filter(poly_id == 'Santa Cruz')
-
-santacruz_map <- ggplot() + 
-  geom_sf(data = santacruz_shp) + 
-  geom_raster(data = compare_sgsb,
-              aes(x=lon_bin,
-                  y=lat_bin,
-                  fill=site_source)) +
-  scale_fill_manual(values = c('cadetblue', 'firebrick4')) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  coord_sf(xlim = c(-119.95, -119.5),
-           ylim = c(33.956, 34.082)) +
-  labs(x="",
-       y="",
-       fill = "Site Source",
-       title = 'Santa Cruz Island') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-anacapa_map
 ```
 
 # GFW Anchorages
@@ -645,19 +510,71 @@ island_anchorages_clean %>%
         axis.ticks = element_blank())
 ```
 
-Only 6 of the identified dive sites (at any time or site threshold) overlapped with known anchorages at the main harbor on Anacapa, Santa Rosa, and Santa Barbara islands, as well as 3 anchorages in Prisoners Harbor and 1 in Scorpion Bay on Santa Cruz island.    
+# Final Site List
 
+For the final site list, remove any dive sites that overlap with known anchorages (29 sites total) and add any sites from the Spotting Giant Seabass dataset. Below is a map of the final dive site locations.  
+<br>   
 ```{r site-harbor-overlap, include=F}
-# Unique dive sites regardless of time or site thresholds
-unique_sites <- compare_sites_filtered %>% 
-  dplyr::select(lat_bin, lon_bin) %>% 
-  distinct() %>% 
-  mutate(id = 'AIS dive site') #260 sites
+# Unique dive sites 
+unique_sites <- dive_sites %>% 
+  mutate(site_type = 'AIS') #3200 sites
 
 harbor_overlap <- unique_sites %>% 
   left_join(island_anchorages_clean %>% 
-              dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 6 sites 
-  mutate(id = ifelse(!is.na(harbor), 'Harbor', id))
+              dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 29 sites 
+  mutate(site_type = ifelse(!is.na(harbor), 'Harbor', site_type))
+
+# Bin SGSB sites to 0.001 x 0.001 degrees
+ci_sites_binned <- ci_sites %>% 
+  mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
+         lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
+  mutate(site_type = "SGSB") %>% 
+  dplyr::select(lat_bin, lon_bin, site_type)
+
+# Remove sites that are harbors
+# Add in sites from SGSB
+dive_sites_rm_harbor <- harbor_overlap %>% 
+  filter(site_type != "Harbor") %>% 
+  bind_rows(ci_sites_binned) %>% 
+  group_by(lat_bin, lon_bin) %>% 
+  mutate(n=n()) %>% 
+  ungroup() %>% 
+  # Remove SGSB sites that are also identified in AIS
+  mutate(repeated = ifelse(site_type == 'SGSB' & n==2, 'yes', 'no')) %>% 
+  filter(repeated == 'no') %>% 
+  # Label sites as both if they were overlapping
+  mutate(site_type = ifelse(n==2, "Both AIS & SGSB", site_type),
+         site_id = 1:nrow(.)) %>% 
+  dplyr::select(site_id, lat_bin, lon_bin, site_type) %>% 
+  mutate(site_type = factor(site_type, levels = c("AIS", "SGSB", "Both AIS & SGSB")))
+```
+
+```{r dive-site-map}
+final_site_map <- ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = dive_sites_rm_harbor,
+             aes(x=lon_bin,
+                 y=lat_bin,
+                 color = site_type),
+             alpha = 0.7,
+             size = 0.2) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_color_manual(breaks = c("AIS", "SGSB", "Both AIS & SGSB"),
+                     values = c('cadetblue', 'firebrick4', 'darkslateblue')) + 
+  labs(x="",
+       y="",
+       color="Site Type") + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+```
+
+
+```{r save-site-list, include=F, eval=F}
+# Save
+write_csv(dive_sites_rm_harbor, file.path(project_data_path, "processed", "dive_sites_1hr_1vessel.csv"))
 ```
 
 
