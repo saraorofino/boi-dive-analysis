@@ -345,12 +345,12 @@ ggplot(data = sites_by_threshold) +
 
 The maps below identify what dive sites are added as the time threshold decreases. It first identifies grid cells considered as "dive sites" if the time spent in a grid cell is at least 1.5 hours. It then looks at what new grid cells are added if the time spent in a grid cell decreases to 1 hour. 
 
-There is a different map for each of the three site thresholds (i.e. 1, 3, or 5 dives)  
+There is a different map for each of the three site thresholds (i.e. 1, 2, 3, 4, or 5 dives)  
 
 ```{r map-dive-sites}
 # Identify the coastal sites that aren't in the CI 
 coastal_sites <- compare_sites %>%
-  filter(site_threshold == 1) %>% 
+  #filter(site_threshold == 1) %>% 
   mutate(coastal_site = case_when(lat_bin > 34.1115 & lon_bin > -120 ~ 'yes',
                                   lat_bin > 34.25 & lon_bin < -120 ~ 'yes',
                                   lat_bin == 33.7235 ~ 'yes',
@@ -412,7 +412,7 @@ We can always classify sites as most vs. least visited once we look at vessel tr
  
 ```{r save-dive-sites, include=F}
 dive_sites <- compare_sites_filtered %>% 
-  filter(time_thresh == 1 & site_threshold == 1 & dive_site == 1) %>% 
+  filter(time_threshold == 1 & site_threshold == 1 & dive_site == 1) %>% 
   dplyr::select(lat_bin, lon_bin) %>% 
   distinct() %>% 
   arrange(lat_bin, lon_bin) %>% 
@@ -569,6 +569,8 @@ final_site_map <- ggplot() +
   theme_bw() +
   theme(axis.text = element_blank(),
         axis.ticks = element_blank())
+
+final_site_map
 ```
 
 
