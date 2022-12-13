@@ -28,6 +28,7 @@ library(bigrquery)
 library(paletteer)
 library(tigris)
 library(kableExtra)
+library(purrr)
 
 
 # Load source
@@ -200,14 +201,16 @@ SELECT
   date,
   lat_bin,
   lon_bin,
-  SUM(hours) AS total_hours
+  SUM(hours) AS total_hours,
+  AVG(distance_from_shore_m) AS avg_distance_shore_m
 FROM (
   SELECT
     ssvid,
     date,
     FLOOR(lat * 1000) / 1000 + 0.0005 AS lat_bin,
     FLOOR(lon * 1000) / 1000 + 0.0005 AS lon_bin,
-    hours
+    hours,
+    distance_from_shore_m
   FROM
     `emlab-gcp.boi_dive_project.ci_ais_activity_all_years`
   WHERE speed_knots < 1
@@ -260,6 +263,7 @@ for(i in time_thresh){
 }
 
 # Number of dives in each grid cell
+## Would be place to add a max time cutoff
 compare_dives <- possible_sites %>%
   group_by(lat_bin, lon_bin, time_threshold) %>%
   dplyr::summarize(dives = sum(dive))
@@ -412,11 +416,67 @@ We can always classify sites as most vs. least visited once we look at vessel tr
  
 ```{r save-dive-sites, include=F}
 dive_sites <- compare_sites_filtered %>% 
-  filter(time_threshold == 1 & site_threshold == 1 & dive_site == 1) %>% 
+  filter(time_threshold == 1.5 & site_threshold == 1 & dive_site == 1) %>% 
   dplyr::select(lat_bin, lon_bin) %>% 
   distinct() %>% 
   arrange(lat_bin, lon_bin) %>% 
   mutate(site_id = 1:nrow(.))
+```
+
+# Add Island and Distance
+
+For each dive site calculate the distance from the nearest shore (m) and assign each to the closest island. 
+
+```{r add-island-distance}
+# Get avg distance from shore for each site 
+avg_distance <- dive_sites %>% 
+  left_join(binned_locations %>% 
+              dplyr::select(lat_bin, lon_bin, avg_distance_shore_m) %>% 
+              distinct() %>% 
+              group_by(lat_bin, lon_bin) %>% 
+              summarize(avg_distance_shore_m = mean(avg_distance_shore_m)) %>% 
+              ungroup(),
+            by = c("lat_bin", "lon_bin")) 
+
+# Assign each dive site to the closest island
+sites_sp <- st_as_sf(avg_distance, 
+                     coords = c("lon_bin", "lat_bin"),
+                     crs = 4269)
+
+ci_shp_nad83 <- ci_shp %>% 
+  st_transform(crs = 4269)
+
+closest <- list()
+for(i in seq_len(nrow(sites_sp))){
+    closest[[i]] <- ci_shp_nad83[which.min(
+    st_distance(ci_shp_nad83, sites_sp[i,])),]
+}
+
+# Extract poly id 
+closest_island <- map_chr(closest, 2)
+
+# Add back in 
+dive_sites_island <- avg_distance %>% 
+  mutate(nearest_island = closest_island)
+
+# Check on map 
+check_islands <- ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = dive_sites_rm_harbor,
+             aes(x=lon_bin,
+                 y=lat_bin,
+                 color = nearest_island),
+             alpha = 0.7,
+             size = 0.2) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  labs(x="",
+       y="",
+       color="Nearest Island") + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) # Looks good 
 ```
 
 # GFW Anchorages
@@ -510,62 +570,76 @@ island_anchorages_clean %>%
         axis.ticks = element_blank())
 ```
 
+
 # Final Site List
 
-For the final site list, remove any dive sites that overlap with known anchorages (29 sites total) and add any sites from the Spotting Giant Seabass dataset. Below is a map of the final dive site locations.  
+This final site list: 
+
+  - Remove any dive sites that overlap with known anchorages (29 sites total). 
+  - Includes only sites for the four Northern Channel Islands (San Miguel, Santa Rosa, Santa Cruz, and Anacapa)  
+  - Includes only dive sites xx meters from shore    
 <br>   
+
 ```{r site-harbor-overlap, include=F}
 # Unique dive sites 
-unique_sites <- dive_sites %>% 
-  mutate(site_type = 'AIS') #3200 sites
+unique_sites <- dive_sites_island %>% 
+  mutate(site_type = 'AIS') #2464 sites
 
 harbor_overlap <- unique_sites %>% 
   left_join(island_anchorages_clean %>% 
               dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 29 sites 
   mutate(site_type = ifelse(!is.na(harbor), 'Harbor', site_type))
 
-# Bin SGSB sites to 0.001 x 0.001 degrees
-ci_sites_binned <- ci_sites %>% 
-  mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
-         lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
-  mutate(site_type = "SGSB") %>% 
-  dplyr::select(lat_bin, lon_bin, site_type)
+# # Bin SGSB sites to 0.001 x 0.001 degrees
+# ci_sites_binned <- ci_sites %>% 
+#   mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
+#          lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
+#   mutate(site_type = "SGSB") %>% 
+#   dplyr::select(lat_bin, lon_bin, site_type)
 
 # Remove sites that are harbors
-# Add in sites from SGSB
-dive_sites_rm_harbor <- harbor_overlap %>% 
+# Keep only Northern CI
+# Remove sites > 10000 meters (10 km)
+dive_sites_final <- harbor_overlap %>% 
   filter(site_type != "Harbor") %>% 
-  bind_rows(ci_sites_binned) %>% 
-  group_by(lat_bin, lon_bin) %>% 
-  mutate(n=n()) %>% 
-  ungroup() %>% 
-  # Remove SGSB sites that are also identified in AIS
-  mutate(repeated = ifelse(site_type == 'SGSB' & n==2, 'yes', 'no')) %>% 
-  filter(repeated == 'no') %>% 
-  # Label sites as both if they were overlapping
-  mutate(site_type = ifelse(n==2, "Both AIS & SGSB", site_type),
-         site_id = 1:nrow(.)) %>% 
-  dplyr::select(site_id, lat_bin, lon_bin, site_type) %>% 
-  mutate(site_type = factor(site_type, levels = c("AIS", "SGSB", "Both AIS & SGSB")))
+  filter(avg_distance_shore_m <= 10000) %>% 
+  filter(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa")) %>% 
+  # Fix numbering 
+  mutate(site_id = 1:nrow(.)) %>% 
+  dplyr::select(site_id, lat_bin, lon_bin, avg_distance_shore_m, nearest_island) #1428 sites
+  # bind_rows(ci_sites_binned) %>% 
+  # group_by(lat_bin, lon_bin) %>% 
+  # mutate(n=n()) %>% 
+  # ungroup() %>% 
+  # # Remove SGSB sites that are also identified in AIS
+  # mutate(repeated = ifelse(site_type == 'SGSB' & n==2, 'yes', 'no')) %>% 
+  # filter(repeated == 'no') %>% 
+  # # Label sites as both if they were overlapping
+  # mutate(site_type = ifelse(n==2, "Both AIS & SGSB", site_type),
+  #        site_id = 1:nrow(.)) %>% 
+  # dplyr::select(site_id, lat_bin, lon_bin, site_type) %>% 
+  # mutate(site_type = factor(site_type, levels = c("AIS", "SGSB", "Both AIS & SGSB")))
 ```
 
 ```{r dive-site-map}
+northern_ci <- ci_shp %>% 
+  filter(poly_id %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
+
 final_site_map <- ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = dive_sites_rm_harbor,
+  #geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = northern_ci, fill = NA) + 
+  geom_point(data = dive_sites_final,
              aes(x=lon_bin,
                  y=lat_bin,
-                 color = site_type),
+                 color = nearest_island),
              alpha = 0.7,
              size = 0.2) +
   scale_x_continuous(expand = c(0,0)) + 
   scale_y_continuous(expand = c(0,0)) + 
-  scale_color_manual(breaks = c("AIS", "SGSB", "Both AIS & SGSB"),
-                     values = c('cadetblue', 'firebrick4', 'darkslateblue')) + 
+  scale_color_manual(values = c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF')) +
   labs(x="",
        y="",
-       color="Site Type") + 
+       color="") + 
   theme_bw() +
   theme(axis.text = element_blank(),
         axis.ticks = element_blank())
@@ -576,7 +650,7 @@ final_site_map
 
 ```{r save-site-list, include=F, eval=F}
 # Save
-write_csv(dive_sites_rm_harbor, file.path(project_data_path, "processed", "dive_sites_1hr_1vessel.csv"))
+write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30in_1vessel_northern_ci_labeled.csv"))
 ```
 
 
