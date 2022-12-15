@@ -61,7 +61,7 @@ ggplot() +
 
 Query all AIS data for all ssvids (15) on the AIS vessel list. 
 
-```{r}
+```{r ais-data, eval=F}
 # Run in BQ console b/c of the create or replace statement
 # Query is very large 1.3Tb 
 # Saved as emlab-gcp.boi_dive_project.ais_activity_all_years
@@ -116,6 +116,70 @@ ais AS (
 )
 
 SELECT * FROM ais"
+```
+
+**Updated December 2022**  
+
+Add AIS until November 30, 2022. Previous query pulled data through July 24, 2022. 
+
+```{r add-2022-ais-data, eval=F}
+sql_ais_2022 <- "#StandardSQL
+
+WITH 
+
+good_segments AS (
+  SELECT
+    seg_id
+  FROM
+    `world-fishing-827.pipe_production_v20201001.research_segs`
+  WHERE good_seg
+  AND NOT overlapping_and_short
+),
+
+ais AS (
+ SELECT
+   *,
+   EXTRACT(DATE FROM timestamp) AS date
+ FROM
+  `world-fishing-827.pipe_production_v20201001.research_messages`
+ WHERE
+ _PARTITIONTIME BETWEEN '2022-07-25' AND '2022-11-30'
+ AND seg_id IN (
+     SELECT
+       seg_id
+      FROM
+        good_segments
+   )
+  AND ssvid IN ('338350134',
+  '368200240',
+  '368926530',
+  '367166830',
+  '366813530',
+  '367036830',
+  '367130890',
+  '367315630',
+  '338776000',
+  '367616930',
+  '367655170',
+  '368024590',
+  '367041160',
+  '367098480',
+  '367384840'
+  )
+)
+
+SELECT * FROM ais"
+```
+
+```{r append-new-data}
+# Append new data to the ais_activity_all_years table
+bq_project_query("emlab-gcp", 
+                 sql_ais_2022,
+                 destination_table = bq_table(project = "emlab-gcp",
+                                              dataset = "boi_dive_project",
+                                              table = "ais_activity_all_years"),
+                 allowLargeResults = TRUE,
+                 write_disposition = "WRITE_APPEND")
 ```
 
 Create a second table of just the activity within the Channel Islands bounding box for easier processing  
