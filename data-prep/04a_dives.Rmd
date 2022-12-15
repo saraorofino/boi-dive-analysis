@@ -1,0 +1,252 @@
+---
+title: "Dives"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(bigrquery)
+library(lubridate)
+library(hms)
+
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Vessel info
+vessel_info <- read_csv(file.path(project_data_path, "processed", "ais_vessel_list.csv"))
+```
+
+# Objective
+
+This markdown takes the initial list of possible dive sites (all grid cells where any vessel spent at least 1.5 hours) and gathers a list of dives for each vessel from January 1, 2016 - November 30, 2022. A "dive" is considered any time a vessel is stationary (moved slower than 1 knot) at an identified dive site for at least 1.5 hours. For each dive we retain the following information:  
+
+  - Vessel name  
+  - Hours: time spent in that grid cell or dive site  
+  - First timestamp: first timestamp (UTC) within the grid cell   
+  - Last timestamp: last timestamp (UTC) within the grid cell  
+  - Overnight: if the first and last timestamp are on different days  
+  - Time of day: early morning (first timestamp before 6am), day (first timestamp between 6am and 6pm), night (first timestamp after 6pm), overnight    
+  - Month: month of dive  
+  - Year  
+
+We then look at defining vessel-specific "core" dive sites based on the frequency of visits per year. Finally, we match AIS positions to dive sites and add site specific information including nearest island, distance to shore, site category (in mpa, in buffer, outside), MPA name, and MPA type (Marine Reserve, Conservation Area).  
+
+# AIS Positions
+
+```{r sql-ais-positions, include=F, eval=F}
+# Keeping only coordinates where vessels moved slower than 1 knot 2016 - November 30, 2022
+sql_ais_locations <- "#StandardSQL
+
+SELECT
+  ssvid,
+  date,
+  month,
+  year,
+  lat_bin,
+  lon_bin,
+  MIN(timestamp) AS first_timestamp,
+  MAX(timestamp) AS last_timestamp,
+  SUM(hours) AS total_hours
+FROM (
+  SELECT
+    ssvid,
+    date,
+    timestamp,
+    EXTRACT(month FROM date) AS month,
+    EXTRACT(year FROM date) AS year, 
+    FLOOR(lat * 1000) / 1000 + 0.0005 AS lat_bin,
+    FLOOR(lon * 1000) / 1000 + 0.0005 AS lon_bin,
+    hours
+  FROM
+    `emlab-gcp.boi_dive_project.ci_ais_activity_all_years`
+  WHERE speed_knots < 1
+  AND EXTRACT(year FROM date) >= 2016
+)
+GROUP BY ssvid, date, month, year, lat_bin, lon_bin"
+
+# Run and download 
+ais_locations <- bq_project_query("emlab-gcp", sql_ais_locations) %>% 
+  bq_table_download(n_max = Inf)
+
+# Timestamps are in UTC - convert to Pacific time so we can classify as day or night based on California time 
+# Add overnight = yes or no 
+# Add time of day: early morning (before 6am), day (6am-6pm), night(after 6pm but not overnight), overnight
+am <- as.POSIXct("06:00:00", tz="US/Pacific", format="%H:%M:%S")
+pm <- as.POSIXct("18:00:00", tz="US/Pacific", format="%H:%M:%S")
+time_am <- as_hms(am)
+time_pm <- as_hms(pm)
+
+ais_locations_pacific <- ais_locations %>% 
+  mutate(first_timestamp_pacific = lubridate::with_tz(first_timestamp, "US/Pacific"),
+         last_timestamp_pacific = lubridate::with_tz(last_timestamp, "US/Pacific")) %>%
+  mutate(overnight = ifelse(date(first_timestamp_pacific) == date(last_timestamp_pacific), "no", "yes")) %>% 
+  mutate(first_time = as_hms(first_timestamp_pacific),
+         last_time = as_hms(last_timestamp_pacific)) %>% 
+  mutate(time_of_day = case_when(overnight == 'no' & first_time < time_am ~ "early_morning",
+                                 overnight == 'no' & first_time > time_pm ~ "night",
+                                 overnight == 'yes' ~ "overnight",
+                                 TRUE ~ "day")) %>% 
+  dplyr::select(-first_timestamp, -last_timestamp, -first_time, -last_time)
+
+# Save so this doesn't have to be re-run
+#write_csv(ais_locations_pacific, file.path(project_data_path, "processed", "ais_stationary_positions_2016_november_2022.csv"))
+```
+
+We count dives from AIS positions where vessels are moving slower than 1 knot and remain stationary within an identified "dive site" cell for at least 90 minutes. We first classify AIS dives by dive site id and then we will add the MPA information for each dive site 1) where in/out is classified based on just Marine Reserves and 2) where in/out is classified on Marine Reserves and Conservation Areas.  
+
+# AIS Dives
+
+```{r ais-dives}
+ais_locations <- read_csv(file.path(project_data_path, "processed", "ais_stationary_positions_2016_november_2022.csv"))
+dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
+
+# Ais dives
+ais_dives <- ais_locations %>% 
+  # At least 1.5 hours in site 
+  filter(total_hours >= 1.5) %>% 
+  inner_join(dive_sites, by = c("lat_bin", "lon_bin")) #10,070 dives 
+
+# Quick initial check 
+check <- ais_dives %>% 
+  group_by(ssvid, date) %>% 
+  summarize(dives_per_day = n()) %>% # From 1-7 "dives" per day (e.g. different sites where vessel was stationary for at least 1.5 hours)
+  ungroup() 
+
+check_overnight <- ais_dives %>% 
+  group_by(overnight) %>% 
+  count() #86% daytime 
+
+check_tod <- ais_dives %>% 
+  group_by(time_of_day) %>% 
+  count() #77% during day 6am-6pm start time
+```
+
+# "Core" Dive Sites
+
+For the analysis we'll construct a series of subsets of the dive data, including a subset of "core" divesites that are most often used by the different vessels. To determine how many dives constitutes a "core" divesite, we first look at the distribution of number of dives per site per year for the different vessels.
+
+Expectation based on survey responses: 
+
+ - Bottom scratcher: 50 core sites 50-60 visits per year 
+ 50-75 visits per year
+ 50+
+ - 
+```{r define-core-site}
+dives_vessel_year <- ais_dives %>% 
+  group_by(ssvid, year, site_id) %>% 
+  count() %>% 
+  left_join(vessel_info %>% 
+              dplyr::select(ssvid, shipname), by = "ssvid")
+
+# Check max visits per site per year by vessel
+check <- dives_vessel_year %>% 
+  group_by(ssvid, year) %>% 
+  summarize(max_dives_per_site = max(n)) %>% 
+  ungroup() %>% 
+  left_join(vessel_info %>% 
+              dplyr::select(ssvid, shipname), by = "ssvid") %>% 
+  dplyr::select(shipname, ssvid, year, max_dives_per_site) %>% 
+  arrange(shipname, year)
+
+# Save to send to Doug/Molly
+write_csv(check, "max_dives_per_site_year_by_vessel.csv")
+
+ssvids <- unique(dives_vessel_year$ssvid)
+
+for(i in ssvids){
+  
+    vessel_year_dives <- dives_vessel_year %>% 
+      filter(ssvid == i)
+    
+    vessel_name <- unique(vessel_year_dives$shipname)
+    
+    vessel_hist <- ggplot(vessel_year_dives) + 
+      geom_histogram(aes(x=n)) + 
+      facet_wrap(~year, scales = 'free') +
+      labs(title = vessel_name)
+    
+    print(vessel_hist)
+}
+
+output <- NULL
+for(i in ssvids){
+  
+  vessel_year_dives <- dives_vessel_year %>% 
+    filter(ssvid == i)
+  
+  vessel_agg_dives <- dives_vessel_agg %>% 
+    filter(ssvid == i)
+  
+  vessel_name <- unique(vessel_year_dives$shipname)
+  
+  top20percent_year <- quantile(vessel_year_dives$n, 0.8)
+  top10percent_year  <- quantile(vessel_year_dives$n, 0.9)
+  
+  output_row <- data.frame(ssvid = i,
+                           shipname = vessel_name,
+                           n_visits_top20_percent = top20percent_year,
+                           n_visits_top10_percent = top10percent_year)
+  
+  output <- output %>% 
+    bind_rows(output_row)
+}
+
+## Test - how many core dive sites would we have per vessel if we used top 80% of visits. 
+test_core_sites <- dives_vessel_year %>% 
+  left_join(output %>% 
+              dplyr::select(ssvid, year_cutoff)) %>% 
+  mutate(core_site = ifelse(n >= year_cutoff, 'yes', 'no')) %>% 
+  group_by(shipname, year) %>% 
+  count(core_site)
+```
+
+
+# Add Dive Site Information
+
+Lastly, add the relevant MPA information for each dive site  
+
+```{r dive-site-info}
+reserves <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_reserves_only.csv"))
+joint <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_reserves_conservation_areas.csv"))
+
+# Reserves
+ais_dives_reserves <- ais_dives %>% 
+  left_join(reserves %>% 
+              dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
+
+# Joint
+ais_dives_joint <- ais_dives %>% 
+  left_join(joint %>% 
+              dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
+
+# Combine into single master dataset 
+all_ais_dives <- ais_dives_reserves %>% 
+  mutate(mpa_definition = "Marine Reserve") %>% 
+  bind_rows(ais_dives_joint %>% 
+              mutate(mpa_id = NA,
+                     mpa_definition = "Marine Reserves & Conservation Areas")) %>% 
+  left_join(vessel_info %>% 
+              dplyr::select(ssvid, shipname), by = "ssvid") %>% 
+  dplyr::select(mpa_definition, ssvid, shipname, date, month, year, first_timestamp_pacific, last_timestamp_pacific, overnight, time_of_day,
+                site_id, site_category, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
+                mpa_id, mpa_name = name, mpa_type)
+
+# Save
+write_csv(all_ais_dives, file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+```
+
+
+
+
+
