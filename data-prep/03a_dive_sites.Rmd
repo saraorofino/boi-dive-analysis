@@ -1,5 +1,5 @@
 ---
-title: "Dive Sites"
+title: "Possible AIS Dive Sites"
 output: 
   bookdown::html_document2:
     toc: true
@@ -45,137 +45,7 @@ ca_counties <- tigris::counties() %>%
 
 # Objective
 
-Identify dive sites in the Channel Islands using (1) sites already logged in the Spotting Giant Sea Bass database and (2) possible sites based on AIS data from dive vessels. 
-
-# SGSB Dive Sites
-
-First we examine a list of dive sites identified through Benioff's Spotting Giant Sea Bass project. This project allows users to enter dive site locations and record instances when giant sea bass are spotted. The list of dive sites identified through this database is a useful comparison for the dive sites identified through AIS data. Some of these dive sites are shore dive sites and some will be near the mainland not the Channel Islands. 
-
-We first identify any dive sites in the Channel Islands which we will later compare to any sites identified through the AIS data. There are a total of 48 dive sites across the Channel Islands in the Spotting Giant Seabass dataset.   
-
-```{r boi-sea-bass-dive-sites}
-# List of dive sites from Spotting Giant Sea Bass 
-seabass_sites <- read_xlsx(file.path(project_data_path, "raw", "SGSB_encounter_sites_reformatted.xlsx"),
-                           sheet = 'Sheet1') %>% 
-  clean_names()
-
-# Filter out missing locations
-seabass_sites <- seabass_sites %>% 
-  filter(!is.na(latitude) | !is.na(longitude)) # 88 sites
-
-# Classify sites in Channel Islands 
-seabass_sites <- seabass_sites %>% 
-  mutate(ci_site = case_when(str_detect(site_name, "Anacapa") ~ 'yes',
-                             str_detect(site_name, "Catalina") ~ 'yes',
-                             str_detect(site_name, "Channel Islands") ~ 'yes',
-                             str_detect(site_name, "San Clemente") ~ 'yes',
-                             str_detect(site_name, "San Nicolas") ~ 'yes',
-                             str_detect(site_name, "Santa Barbara") ~ 'yes',
-                             str_detect(site_name, "Santa Cruz") ~ 'yes',
-                             TRUE ~ 'no'),
-         island = case_when(str_detect(site_name, "Anacapa") ~ 'Anacapa',
-                            str_detect(site_name, "Catalina") ~ 'Catalina',
-                            str_detect(site_name, "Channel Islands") ~ 'Channel Islands',
-                            str_detect(site_name, "San Clemente") ~ 'San Clemente',
-                            str_detect(site_name, "San Nicolas") ~ 'San Nicolas',
-                            str_detect(site_name, "Santa Barbara") ~ 'Santa Barbara',
-                            str_detect(site_name, "Santa Cruz") ~ 'Santa Cruz',
-                            TRUE ~ 'NA'))
-
-# Filter for only CI sites
-ci_sites <- seabass_sites %>% 
-  filter(ci_site == 'yes') # 49 (56% of sites)
-
-# Check if 0.001 x 0.001 is high enough resolution 
-check_res <- ci_sites %>% 
-  mutate(lat = floor(latitude* 1000) / 1000,
-         lon = floor(longitude* 1000) / 1000) %>% 
-  group_by(lat, lon) %>% 
-  count() # One grid cell has two sites
-
-check_lat <- ci_sites %>% 
-  mutate(lat = floor(latitude* 1000) / 1000,
-         lon = floor(longitude* 1000) / 1000) %>% 
-  filter(lat == 34.004) # 2 Anacapa sites with different names but exact same lat/lon so probably the same site 
-
-# Remove duplicate site
-ci_sites <- ci_sites %>% 
-  dplyr::filter(site_name != 'Anacapa Island')
-
-# Table of sites by island
-count_sites <- ci_sites %>% 
-  group_by(island) %>% 
-  count() %>% 
-  bind_rows(data.frame(island = 'Total',
-            n = 48))
-
-kable(count_sites,
-      caption = "Number of dive sites in the Channel Islands from the SGSB dataset by island.",
-      col.names = c("Island", "Number of Dive Sites"),
-      format = 'html') %>% 
-  row_spec(0, bold = T) %>%
-  row_spec(8, italic = T) %>% 
-  kable_styling(bootstrap_options = c("striped", "hover", "responsive"),
-                full_width = F) %>% 
-  kableExtra::kable_classic_2()
-```
-
-<br> 
-
-Below are maps of (1) all dive sites in the Spotting Giant Seabass dataset and (2) only dive sites located in the Channel Islands.  
-
-## Site Maps {.tabset}
-
-### All sites
-
-```{r all-sites-map}
-# Map all sites
-all_sites_map <- ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = seabass_sites,
-             aes(x=longitude, y=latitude, color = ci_site),
-             alpha = 0.7) + 
-  scale_color_manual(values = c('firebrick4', 'midnightblue'),
-                     labels = c('No', 'Yes')) + 
-  labs(x="",
-       y="",
-       title = "All Spotting Giant Sea Bass Dive Sites",
-       subtitle = "Sites = 88",
-       color = 'Channel Islands Site') + 
-  theme_bw() + 
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank()) 
-
-all_sites_map
-```
-
-### Channel Islands Sites
-
-```{r ci-sites-map}
-# Map CI sites
-island_cols <- c('#F4E7C5FF', '#678096FF', '#ACC2CFFF', '#979461FF', '#CD5733FF', '#A12A19FF', '#6E6C81FF')
-
-ci_sites_map <- ggplot() + 
-  #geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = ci_sites,
-             aes(x=longitude, y=latitude, color = island),
-             alpha = 0.7) + 
-  scale_color_manual(values = island_cols) +
-  labs(x="",
-       y="",
-       title = "CI Spotting Giant Sea Bass Dive Sites",
-       subtitle = "Sites = 48",
-       color = "") + 
-  theme_bw() + 
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-ci_sites_map
-```
-
-Converting these dive site locations into 0.001 x 0.001 degree grids there are no grids containing more than 1 dive site which makes it seem like an appropriate resolution to use for the AIS data when looking for additional sites. 
+Identify possible dive sites in the Channel Islands based on AIS data from dive vessels. 
 
 # AIS Dive Sites
 
@@ -190,10 +60,10 @@ This method is a rough adaptation of the GFW anchorage algorithm, more details a
 
 ## Bin Coordinates 
 
-We use AIS data from 2016-2021 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
+We use AIS data from 2016 - November 30, 2022 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
 
 ```{r sql-bin-locations, include=F}
-# Keeping only coordinates where vessels moved slower than 1 knot 2016-2021
+# Keeping only coordinates where vessels moved slower than 1 knot 2016-November 30, 2022
 sql_bin_locations <- "#StandardSQL
 
 SELECT
@@ -215,7 +85,6 @@ FROM (
     `emlab-gcp.boi_dive_project.ci_ais_activity_all_years`
   WHERE speed_knots < 1
   AND EXTRACT(year FROM date) >= 2016
-  AND EXTRACT(year FROM date) <= 2021
 )
 GROUP BY ssvid, date, lat_bin, lon_bin"
 
@@ -409,7 +278,7 @@ for(i in site_threshold){
 ```
 
 For now we move forward with the least restrictive set of parameters:  
- - Time threshold: 1 hour  
+ - Time threshold: 1.5 hours 
  - Site threshold: 1 vessels   
  
 We can always classify sites as most vs. least visited once we look at vessel tracks but we don't want to eliminate sites that might be sites by being too restrictive.  
@@ -423,7 +292,7 @@ dive_sites <- compare_sites_filtered %>%
   mutate(site_id = 1:nrow(.))
 ```
 
-# Add Island and Distance
+# Add Dive Site Characteristics 
 
 For each dive site calculate the distance from the nearest shore (m) and assign each to the closest island. 
 
@@ -463,7 +332,7 @@ dive_sites_island <- avg_distance %>%
 check_islands <- ggplot() + 
   geom_sf(data = ca_counties, fill = NA) + 
   geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(data = dive_sites_rm_harbor,
+  geom_point(data = dive_sites_island,
              aes(x=lon_bin,
                  y=lat_bin,
                  color = nearest_island),
@@ -570,55 +439,39 @@ island_anchorages_clean %>%
         axis.ticks = element_blank())
 ```
 
-
 # Final Site List
 
-This final site list: 
+At this stage we only remove sites that overlap with known anchorages (29) and those that are further than 10 km from shore. These sites will be further subset for analysis.  
 
-  - Remove any dive sites that overlap with known anchorages (29 sites total). 
-  - Includes only sites for the four Northern Channel Islands (San Miguel, Santa Rosa, Santa Cruz, and Anacapa)  
-  - Includes only dive sites xx meters from shore    
 <br>   
 
 ```{r site-harbor-overlap, include=F}
 # Unique dive sites 
 unique_sites <- dive_sites_island %>% 
-  mutate(site_type = 'AIS') #2464 sites
+  mutate(site_type = 'AIS') #2673 sites
 
 harbor_overlap <- unique_sites %>% 
   left_join(island_anchorages_clean %>% 
               dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 29 sites 
   mutate(site_type = ifelse(!is.na(harbor), 'Harbor', site_type))
 
-# # Bin SGSB sites to 0.001 x 0.001 degrees
-# ci_sites_binned <- ci_sites %>% 
-#   mutate(lat_bin = floor(latitude * 1000) / 1000 + 0.0005,
-#          lon_bin = floor(longitude * 1000) / 1000 + 0.0005) %>% 
-#   mutate(site_type = "SGSB") %>% 
-#   dplyr::select(lat_bin, lon_bin, site_type)
-
 # Remove sites that are harbors
-# Keep only Northern CI
 # Remove sites > 10000 meters (10 km)
-dive_sites_final <- harbor_overlap %>% 
-  filter(site_type != "Harbor") %>% 
-  filter(avg_distance_shore_m <= 10000) %>% 
-  filter(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa")) %>% 
+dive_sites_final <- harbor_overlap %>%
+  filter(site_type != "Harbor") %>%
+  filter(avg_distance_shore_m <= 10000) %>%
+  mutate(island_group = ifelse(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"), "Northern", "Southern")) %>% 
+  # Make nearest island a factor based on island order
+  mutate(nearest_island = factor(nearest_island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa",
+                                                            "Santa Barbara", "San Nicolas", "Catalina", "San Clemente"))) %>% 
+  arrange(island_group, nearest_island) %>% 
   # Fix numbering 
   mutate(site_id = 1:nrow(.)) %>% 
-  dplyr::select(site_id, lat_bin, lon_bin, avg_distance_shore_m, nearest_island) #1428 sites
-  # bind_rows(ci_sites_binned) %>% 
-  # group_by(lat_bin, lon_bin) %>% 
-  # mutate(n=n()) %>% 
-  # ungroup() %>% 
-  # # Remove SGSB sites that are also identified in AIS
-  # mutate(repeated = ifelse(site_type == 'SGSB' & n==2, 'yes', 'no')) %>% 
-  # filter(repeated == 'no') %>% 
-  # # Label sites as both if they were overlapping
-  # mutate(site_type = ifelse(n==2, "Both AIS & SGSB", site_type),
-  #        site_id = 1:nrow(.)) %>% 
-  # dplyr::select(site_id, lat_bin, lon_bin, site_type) %>% 
-  # mutate(site_type = factor(site_type, levels = c("AIS", "SGSB", "Both AIS & SGSB")))
+  dplyr::select(site_id, lat_bin, lon_bin, avg_distance_shore_m, nearest_island, island_group) #2605 sites
+
+## Check sites in Northern CI only
+check_north_ci <- dive_sites_final %>% 
+  filter(island_group == "Northern") #1526 sites
 ```
 
 ```{r dive-site-map}
@@ -628,7 +481,7 @@ northern_ci <- ci_shp %>%
 final_site_map <- ggplot() + 
   #geom_sf(data = ca_counties, fill = NA) + 
   geom_sf(data = northern_ci, fill = NA) + 
-  geom_point(data = dive_sites_final,
+  geom_point(data = check_north_ci,
              aes(x=lon_bin,
                  y=lat_bin,
                  color = nearest_island),
@@ -650,7 +503,7 @@ final_site_map
 
 ```{r save-site-list, include=F, eval=F}
 # Save
-write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30in_1vessel_northern_ci_labeled.csv"))
+write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
 ```
 
 
