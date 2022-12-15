@@ -1,0 +1,266 @@
+---
+title: 'Dive Site MPA Overlap'
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+```
+
+```{r libraries, include=F}
+# Load libraries
+library(tidyverse)
+library(sf)
+library(bigrquery)
+library(lubridate)
+library(paletteer)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Dive sites
+dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
+```
+
+```{r mapping, include=F}
+# Channel Islands shp
+ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+
+# MPA Boundaries 
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+```
+
+## Overview 
+
+In this document we look at the overlap of dive sites and MPAs. We are counting a dive site as any grid cell with at least 1 visits, where a visit is defined as a dive boat that has remained stationary in that grid cell for at least 1.5 hours on a given day. We classify each dive site as being within an MPA, outside an MPA, or within the buffer (e.g., within 500 meters of an MPA boundary). For each dive site we add the following information: 
+
+  - site_type: dive site type (in_mpa, in_buffer, outside_mpa)  
+  - mpa_name: name of MPA, `NA` if site is outside MPA   
+  - mpa_type: type or designation of MPA (Federal Marine Reserve, Federal Marine Conservation Area, State Marine Reserve, State Marine Conservation Area), `NA` if outside MPA    
+  - no_take: the level of no take in the area (full for Federal/State Marine Reserves; part for Federal/State Marine Conservation Areas; none if outside MPA)  
+
+## Buffer MPAs
+
+Map of Channel Islands MPAs based on the 2020 MPA Atlas. For determining if dive sites are within an MPA, we look at MPAs with the following designations:  
+
+  - State Marine Reserves   
+  - State Marine Conservation Areas  
+  - Federal Marine Reserve  
+  - Federal Marine Conservation Area  
+
+```{r mpa-map}
+# Remove the "National Marine Sanctuary" boundary from shp
+mpas <- mpa_shp %>% 
+  filter(mpa_id != 8688)
+
+# Revise the no take designation for Fed. Conservation Area (some fishing allowed)
+mpas <- mpas %>% 
+  mutate(fishing = ifelse(mpa_type == 'Federal Marine Conservation Area', 'Some Restrictions', fishing)) %>% 
+  mutate(no_take = ifelse(fishing == "None", "All", "Part"))
+
+ggplot() + 
+  geom_sf(data = ci_shp, fill = NA, color = 'black') + 
+  geom_sf(data = mpas, aes(fill = mpa_type), alpha = 0.6) + 
+  scale_fill_manual(values = c('slategray3', 'tomato', 'darkcyan', 'firebrick')) + 
+  labs(fill = "MPA Type",
+       x="",
+       y="") + 
+  theme_bw()
+
+## Join Federal and State Reserves/Conservation Areas for secondary analysis 
+# Update names for adjacent MPAs
+mpa_join <- mpas %>% 
+  mutate(join_name = str_remove(name, " \\(.*")) %>% 
+  mutate(join_name = str_remove(join_name, "Offshore"),
+         join_name = str_remove(join_name, "Onshore")) %>% 
+  mutate(mpa_type = case_when(join_name == 'Anacapa Island' ~ "Federal/State Reserve & Conservation Area",
+                              join_name %in% c('Blue Cavern', 'Farnsworth ') ~ "State Marine Conservation Area",
+                              join_name %in% c('Footprint', 'Gull Island', 'Harris Point', 'Richardson Rock',
+                                               'Santa Barbara Island', 'Scorpion', 'South Point') ~ "Federal/State Marine Reserve",
+                              TRUE ~ mpa_type)) 
+
+mpa_join <- mpa_join %>% group_by(join_name, mpa_type) %>% summarize()
+
+# check
+ggplot() + 
+  geom_sf(data = ci_shp, fill = NA, color = 'black') + 
+  geom_sf(data = mpa_join, aes(fill = join_name), alpha = 0.6) + 
+  #scale_fill_manual(values = c('slategray3', 'tomato', 'darkcyan', 'firebrick')) + 
+  labs(fill = "",
+       x="",
+       y="") + 
+  theme_bw() # Looks right but some weird lines still in the polygons? 
+```
+
+We create two types of MPA buffers. For one we consider a 500 meter buffer around only Federal/State Marine Reserves, for the second we create a 500 meter buffer around the grouped Federal/State Marine Reserves and the Federal/State Conservation Areas.  
+
+```{r buffer-mpas, include=F}
+## Buffer only reserves - use NAD83 for distance 
+reserves_nad83 <- mpas %>% 
+  filter(mpa_type %in% c("Federal Marine Reserve", "State Marine Reserve")) %>% 
+  st_transform(crs = 4269)
+
+# Create 500 meter buffer around all MPA boundaries
+reserve_buff <- st_buffer(reserves_nad83, dist=500)
+
+# Remove the polygon to just get the buffer
+reserve_buff_boundary  <- rmapshaper::ms_erase(reserve_buff, reserves_nad83)
+
+## Buffer combined Reserves and Conservation Areas
+mpa_join_nad83 <- st_transform(mpa_join, crs=4269)
+joint_buff <- st_buffer(mpa_join_nad83, dist=500)
+
+# Remove polygon to just get buffer
+joint_buff_boundary <- rmapshaper::ms_erase(joint_buff, mpa_join_nad83)
+```
+
+## Classify Dive Sites
+
+We classify each of the 2,605 dive sites as being within a MPA, within a buffer, or outside a MPA.   
+First we do this considering "in MPA" as being only within a Federal or State Marine Reserve  
+
+```{r classify-dive-sites-reserves, echo=F}
+# Crs of mpa shp 
+target_crs <- st_crs(reserves_nad83)
+
+# Create spatial points from dive sites
+dive_sites_sf <- st_as_sf(dive_sites,
+                          coords = c('lon_bin', 'lat_bin'),
+                          crs = target_crs)
+
+## Reserves only 
+# Dive sites within the MPA boundary 
+sites_in_reserve <- st_intersection(dive_sites_sf, reserves_nad83) #306 unique sites 
+
+# Dive sites within the buffer 
+sites_in_reserve_buff <- st_intersection(dive_sites_sf, reserve_buff_boundary) #165 unique sites
+
+# Combine 
+dive_site_reserve_cat <- sites_in_reserve %>% 
+  mutate(site_category = "in_mpa") %>% 
+  bind_rows(sites_in_reserve_buff %>% 
+              mutate(site_category = "in_buffer"))
+
+# What sites aren't in MPAs or the buffer?
+ids <- dive_site_reserve_cat$site_id
+
+missing_ids <- setdiff(dive_sites$site_id, ids) #2,134 outside 
+
+outside_reserve <- dive_sites_sf %>% 
+  filter(site_id %in% missing_ids) %>% 
+  mutate(site_category = 'outside_mpa')
+
+# Add missing to the list 
+all_site_reserve_cat <- dive_site_reserve_cat %>% 
+  dplyr::select(site_id, avg_distance_shore_m, nearest_island, island_group, site_category, mpa_id, name, mpa_type) %>% 
+  bind_rows(outside_reserve) %>% 
+  arrange(site_id)
+
+## Save dive sites by category
+reserve_categories_save <- all_site_reserve_cat %>% st_set_geometry(NULL)
+write_csv(reserve_categories_save, file.path(project_data_path, "processed", "dive_sites_by_mpa_category_reserves_only.csv"))
+
+# Plot dive sites by category
+sites_by_cat <- all_site_reserve_cat %>% 
+  st_set_geometry(NULL) %>% 
+  dplyr::select(site_id, site_category) %>% 
+  distinct() %>% 
+  group_by(site_category) %>% 
+  summarize(n_dive_sites = n()) %>% 
+  ungroup() %>% 
+  mutate(total_sites = nrow(dive_sites)) %>% 
+  mutate(frac_sites = round(n_dive_sites / total_sites, 2))
+
+ggplot(sites_by_cat) + 
+  geom_col(aes(x=site_category, y=n_dive_sites),
+           fill = 'slategrey',
+           alpha = 0.95) + 
+  geom_text(aes(label = frac_sites, x = site_category, y = n_dive_sites + 0.5),
+            position = position_dodge(0.9),
+            vjust = 0) + 
+  scale_x_discrete(expand = c(0,0),
+                   breaks = c("in_buffer", "in_mpa", "outside_mpa"),
+                   labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,2800),
+                     breaks = seq(0,2500,500)) +
+  labs(y = 'Number of Dive Sites',
+       x = 'Dive Site Category',
+       title = "Federal/State Marine Reserves") + 
+  theme_bw()
+```
+<br>  
+
+We then look at "in MPA" as being in either Federal/State Marine Reserves or Federal/State Conservation Areas.  
+
+```{r classify-dive-sites-joint, echo=F}
+## Joint reserves and conservation areas 
+# Dive sites within the MPA boundary 
+sites_in_joint <- st_intersection(dive_sites_sf, mpa_join_nad83) #485 unique sites 
+
+# Dive sites within the buffer 
+sites_in_joint_buff <- st_intersection(dive_sites_sf, joint_buff_boundary) #283 unique sites
+
+# Combine 
+dive_site_joint_cat <- sites_in_joint %>% 
+  mutate(site_category = "in_mpa") %>% 
+  bind_rows(sites_in_joint_buff %>% 
+              mutate(site_category = "in_buffer"))
+
+# What sites aren't in MPAs or the buffer?
+ids <- dive_site_joint_cat$site_id
+
+missing_ids <- setdiff(dive_sites$site_id, ids) #1,843 outside 
+
+outside_joint <- dive_sites_sf %>% 
+  filter(site_id %in% missing_ids) %>% 
+  mutate(site_category = 'outside_mpa')
+
+# Add missing to the list 
+all_site_joint_cat <- dive_site_joint_cat %>% 
+  dplyr::select(site_id, avg_distance_shore_m, nearest_island, island_group, site_category, name = join_name, mpa_type) %>% 
+  bind_rows(outside_joint) %>% 
+  arrange(site_id) %>% 
+  # 6 sites within buffer of two Catalina State Conservation Areas
+  # Combine names to keep correct number of sites 
+  mutate(name = ifelse(site_id %in% c(1893:1898), "Casino Point/Lover's Cove", name)) %>% 
+  distinct()
+
+## Save dive sites by category
+joint_categories_save <- all_site_joint_cat %>% st_set_geometry(NULL)
+write_csv(joint_categories_save, file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_reserves_conservation_areas.csv"))
+
+# Plot dive sites by category
+joint_sites_by_cat <- all_site_joint_cat %>% 
+  st_set_geometry(NULL) %>% 
+  dplyr::select(site_id, site_category) %>% 
+  distinct() %>% 
+  group_by(site_category) %>% 
+  summarize(n_dive_sites = n()) %>% 
+  ungroup() %>% 
+  mutate(total_sites = nrow(dive_sites)) %>% 
+  mutate(frac_sites = round(n_dive_sites / total_sites, 2))
+
+ggplot(joint_sites_by_cat) + 
+  geom_col(aes(x=site_category, y=n_dive_sites),
+           fill = 'slategrey',
+           alpha = 0.95) + 
+  geom_text(aes(label = frac_sites, x = site_category, y = n_dive_sites + 0.5),
+            position = position_dodge(0.9),
+            vjust = 0) + 
+  scale_x_discrete(expand = c(0,0),
+                   breaks = c("in_buffer", "in_mpa", "outside_mpa"),
+                   labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,2800),
+                     breaks = seq(0,2500,500)) +
+  labs(y = 'Number of Dive Sites',
+       x = 'Dive Site Category',
+       title = "Federal/State Marine Reserves and Conservation Areas") + 
+  theme_bw()
+```
