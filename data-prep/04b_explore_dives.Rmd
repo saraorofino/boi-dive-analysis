@@ -8,6 +8,144 @@ output:
     self_contained: true
 ---
 
+```{r setup, include=F, message=F, warning=F}
+library(tidyverse)
+library(sf)
+library(paletteer)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Shapefiles
+ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+
+# Data 
+dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
+ais_dives  <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+```
+
+## Interactive Map
+
+Map of the Northern Channel Island MPAs and possible dive sites. The map includes the following layers:  
+
+  - `mpa_outline`: outline of MPA boundaries  
+  - `mpa_type`: type of MPA (e.g., Marine Reserve or Conservation Area)   
+  - `dive_sites`: possible dive sites identified through AIS (e.g., all sites where a vessel remained stationary for at least 90 minutes)  
+    - There are 1,526 possible dive sites identified in the Northern Channel Islands  
+  - `ais_dives`: dives identified from AIS tracks from January 1, 2016 - November 30, 2022 
+    - They are colored by vessel id; there are 6,259 dives across 13 dive vessels   
+  
+Click the layers in the upper right hand corner to add layers to the map. Hover over MPAs in the `mpa_type` layer for MPA names, and over the dots in the `ais_dives` layer for more information about that dive (e.g., shipname, date, time of day). Both the `dive_sites` and `ais_dives` layers are clustered, zooming in on the map with uncluster them and reveal more of the detailed information.  
+
+<br>  
+
+```{r leaflet, echo=F, warning=F, message=F}
+library(leaflet)
+library(leaflet.providers)
+library(htmltools)
+
+# Northern Channel Islands
+north_ci <- ci_shp %>% 
+  filter(poly_id %in% c('San Miguel', 'Santa Rosa', 'Santa Cruz', 'Anacapa'))
+
+north_mpas <- mpa_shp %>% 
+  filter(!mpa_id %in% c(7599, 8688, 68808024:68808039, 68808268)) %>% 
+  mutate(mpa_type = factor(mpa_type, levels = c("Federal Marine Conservation Area", "Federal Marine Reserve",
+                                                "State Marine Reserve", "State Marine Conservation Area")))
+
+# North dive sites
+north_sites <- dive_sites %>% 
+  filter(island_group == "Northern") %>% 
+  rename(x=lon_bin,
+         y=lat_bin)
+
+# AIS dives northern CI
+north_dives <- ais_dives %>% 
+  filter(mpa_definition == "Marine Reserve" & island_group == "Northern") %>% 
+  # Create a factor from shipname for colors
+  mutate(shipname = factor(shipname)) %>% 
+  rename(x=lon_bin,
+         y=lat_bin)
+  
+
+## Colors
+pal <- c('slategray3', 'tomato', 'darkcyan', 'firebrick')
+mpa_pal <- colorFactor(pal, north_mpas$mpa_type) 
+
+ship_pal <- c(paletteer_d('nationalparkcolors::Arches', 5), paletteer_d('nationalparkcolors::CraterLake', 3), 
+                   "#376597FF", "#E8C533FF", "#979461FF", "#CD5733FF", "#A12A19FF")
+shipname_pal <- colorFactor(ship_pal, north_dives$shipname)
+
+## Map
+interactive_map <- leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolygons(data=north_mpas,
+              smoothFactor = 0.5,
+              opacity = 1,
+              weight = 1,
+              color = "grey60",
+              fillColor = NA,
+              group = "mpa_outline") %>% 
+  addPolygons(data=north_mpas,
+              smoothFactor = 0.5,
+              opacity = 1,
+              weight = 1,
+              color = ~mpa_pal(mpa_type),
+              fillColor = ~mpa_pal(mpa_type),
+              fillOpacity = 0.6,
+              group = "mpa_type",
+              label = paste("Name:", north_mpas$name)) %>% 
+  addCircleMarkers(data=north_sites,
+                   lng = north_sites$x,
+                   lat = north_sites$y,
+                   radius = 5,
+                   color = "#8b1a1a",
+                   fillColor = "#8b1a1a",
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "dive_sites",
+                   clusterOptions = markerClusterOptions()) %>%
+  addCircleMarkers(data=north_dives,
+                   lng = north_dives$x,
+                   lat = north_dives$y,
+                   radius = 5,
+                   color = ~shipname_pal(shipname),
+                   fillColor = ~shipname_pal(shipname),
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "ais_dives",
+                   label = paste("Vessel:", north_dives$shipname, "<br>",
+                                 "Date:", north_dives$date, "<br>",
+                                 "Time of Day:", north_dives$time_of_day) %>%
+                     lapply(htmltools::HTML),
+                   clusterOptions = markerClusterOptions()) %>%
+  addLegend("bottomright",
+            pal = mpa_pal,
+            values = north_mpas$mpa_type,
+            title = "MPA Type",
+            opacity = 1,
+            group = "mpa_type") %>% 
+  addLegend("bottomleft",
+            pal = shipname_pal,
+            values = north_dives$shipname,
+            title = "Vessel Name",
+            opacity = 1,
+            group = "ais_dives") %>% 
+  addLayersControl(baseGroups = c("mpa_outline"), 
+                   overlayGroups = c("mpa_type", "dive_sites", "ais_dives"),
+                   options = layersControlOptions(collapsed = FALSE)) %>% 
+  hideGroup("mpa_type") %>% 
+  hideGroup("dive_sites") %>% 
+  hideGroup("ais_dives")
+
+interactive_map
+```
+
+
+
+
+## Old
 ### Dives by Year
 
 The total number of dives by year aggregated across all vessels is shown in the first plot and the number of dives by year for each vessel is shown in the second plot. We see an (expected) decline in dive activity from 2019-2020. This plot is reflective of dives from only those vessels who have responded to the survey so far: Spectre, Peace, Raptor, and Vision.         
@@ -362,3 +500,4 @@ ggplot(annual_dives_by_category) +
   theme_bw() + 
   facet_wrap(~year)
 ```
+
