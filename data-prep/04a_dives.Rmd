@@ -136,12 +136,6 @@ check_tod <- ais_dives %>%
 
 For the analysis we'll construct a series of subsets of the dive data, including a subset of "core" divesites that are most often used by the different vessels. To determine how many dives constitutes a "core" divesite, we first look at the distribution of number of dives per site per year for the different vessels.
 
-Expectation based on survey responses: 
-
- - Bottom scratcher: 50 core sites 50-60 visits per year 
- 50-75 visits per year
- 50+
- - 
 ```{r define-core-site}
 dives_vessel_year <- ais_dives %>% 
   group_by(ssvid, year, site_id) %>% 
