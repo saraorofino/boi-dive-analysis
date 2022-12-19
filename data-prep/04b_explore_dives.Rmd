@@ -22,7 +22,7 @@ mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel
 
 # Data 
 dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
-ais_dives  <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+ais_dives  <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime.csv"))
 ```
 
 ## Interactive Map
@@ -33,8 +33,8 @@ Map of the Northern Channel Island MPAs and possible dive sites. The map include
   - `mpa_type`: type of MPA (e.g., Marine Reserve or Conservation Area)   
   - `dive_sites`: possible dive sites identified through AIS (e.g., all sites where a vessel remained stationary for at least 90 minutes)  
     - There are 1,526 possible dive sites identified in the Northern Channel Islands  
-  - `ais_dives`: dives identified from AIS tracks from January 1, 2016 - November 30, 2022 
-    - They are colored by vessel id; there are 6,259 dives across 13 dive vessels   
+  - `ais_dives`: subset of dives identified from AIS tracks from January 1, 2016 - November 30, 2022 
+    - There are 3,537 dives across 10 dive vessels; these are only dives in Northern Channel Islands, where vessels remained at site between 1.5 and 5 hours and when dives occurred during the day (i.e., start time between 6 am and 6 pm).     
   
 Click the layers in the upper right hand corner to add layers to the map. Hover over MPAs in the `mpa_type` layer for MPA names, and over the dots in the `ais_dives` layer for more information about that dive (e.g., shipname, date, time of day). Both the `dive_sites` and `ais_dives` layers are clustered, zooming in on the map with uncluster them and reveal more of the detailed information.  
 
@@ -62,9 +62,9 @@ north_sites <- dive_sites %>%
 
 # AIS dives northern CI
 north_dives <- ais_dives %>% 
-  filter(mpa_definition == "Marine Reserve" & island_group == "Northern") %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
   # Create a factor from shipname for colors
-  mutate(shipname = factor(shipname)) %>% 
+  mutate(site_frequency = factor(site_frequency, levels = c('high', 'medium', 'low'))) %>% 
   rename(x=lon_bin,
          y=lat_bin)
   
@@ -73,9 +73,12 @@ north_dives <- ais_dives %>%
 pal <- c('slategray3', 'tomato', 'darkcyan', 'firebrick')
 mpa_pal <- colorFactor(pal, north_mpas$mpa_type) 
 
-ship_pal <- c(paletteer_d('nationalparkcolors::Arches', 5), paletteer_d('nationalparkcolors::CraterLake', 3), 
-                   "#376597FF", "#E8C533FF", "#979461FF", "#CD5733FF", "#A12A19FF")
-shipname_pal <- colorFactor(ship_pal, north_dives$shipname)
+freq <- hcl.colors(n=3, palette = "Heat")
+frequency_pal <- colorFactor(freq, north_dives$site_frequency)
+
+# ship_pal <- c(paletteer_d('nationalparkcolors::Arches', 5), paletteer_d('nationalparkcolors::CraterLake', 3), 
+#                    "#376597FF", "#E8C533FF", "#979461FF", "#CD5733FF", "#A12A19FF")
+# shipname_pal <- colorFactor(ship_pal, north_dives$shipname)
 
 ## Map
 interactive_map <- leaflet() %>%
@@ -110,13 +113,12 @@ interactive_map <- leaflet() %>%
                    lng = north_dives$x,
                    lat = north_dives$y,
                    radius = 5,
-                   color = ~shipname_pal(shipname),
-                   fillColor = ~shipname_pal(shipname),
+                   color = ~frequency_pal(site_frequency),
+                   fillColor = ~frequency_pal(site_frequency),
                    stroke = FALSE,
                    fillOpacity = 1,
                    group = "ais_dives",
-                   label = paste("Vessel:", north_dives$shipname, "<br>",
-                                 "Date:", north_dives$date, "<br>",
+                   label = paste("Date:", north_dives$date, "<br>",
                                  "Time of Day:", north_dives$time_of_day) %>%
                      lapply(htmltools::HTML),
                    clusterOptions = markerClusterOptions()) %>%
@@ -127,9 +129,9 @@ interactive_map <- leaflet() %>%
             opacity = 1,
             group = "mpa_type") %>% 
   addLegend("bottomleft",
-            pal = shipname_pal,
-            values = north_dives$shipname,
-            title = "Vessel Name",
+            pal = frequency_pal,
+            values = north_dives$site_frequency,
+            title = "Site Frequency",
             opacity = 1,
             group = "ais_dives") %>% 
   addLayersControl(baseGroups = c("mpa_outline"), 
@@ -142,7 +144,145 @@ interactive_map <- leaflet() %>%
 interactive_map
 ```
 
+## Exploratory {.tabset}
 
+The following are just a few quick exploratory plots on the AIS identified dives. 
+
+### Core Sites
+
+The first plot compares the number of dives at high frequency, medium frequency, and low frequency sites. The second plot looks at the proportion of sites by site frequency within each MPA classification (i.e., proportion of high frequency sites located within MPAs, in MPA buffers, or outside of MPAs). Finally, we compare the number of dives by MPA classification for high frequency dive sites.    
+
+High frequency are sites with the top 25% of visits (aggregated across all vessels and years), sites with more than 3 visits are considered "high frequency" and there are 222 high frequency sites. Medium frequency sites are the next 25% of visits, sites with more than one visit and 3 or less visits are considered "medium" frequency. There are 257 medium frequency sites. The remaining 518 sites, were only visited once and are considered low frequency sites. 
+
+<br>  
+
+```{r core-sites, message=F, warning=F, echo=F}
+dives_frequency <- north_dives %>% 
+  group_by(year, site_frequency) %>% 
+  dplyr::summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  group_by(year) %>% 
+  mutate(total_annual_dives = sum(n_dives)) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_annual_dives)
+
+dive_frequency_plot <- ggplot(data=dives_frequency) + 
+  geom_col(aes(x=year, y=n_dives, fill=site_frequency)) + 
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_fill_manual(values = freq,
+                    labels = c("High", "Medium", "Low")) + 
+  labs(x="Year", 
+       y="Number of Dives",
+       fill="Site Frequency") + 
+  theme_bw()
+
+dive_frequency_plot
+```
+<br> 
+58 -76 % of the dives in each year are done at one of the 222 high frequency sites. The proportion of dives at frequency sites are lower in 2020-2022 (58-65%) than previous years (72-76%).  
+
+<br> 
+
+```{r mpa-classification-core-sites, message=F, warning=F, echo=F}
+site_mpa_frequency <- ais_dives %>% 
+  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+  distinct() %>% 
+  group_by(mpa_definition, site_frequency) %>% 
+  mutate(total_sites_in_frequency = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  count() %>% 
+  mutate(prop_category = n / total_sites_in_frequency)
+
+site_mpa_plot <- ggplot(site_mpa_frequency) + 
+  geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Low", "Medium", "High")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Site Frequency",
+       y="Proportion of Sites",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+site_mpa_plot
+```
+
+<br>
+While a majority of the dive sites in each site frequency group (High, Medium, Low) are classified as being outside of MPAs, there is a larger proportion of the medium frequency and high frequency sites within MPAs compared to low frequency sites. This trend is more pronounced when looking at the combined Marine Reserve and Conservation Area definition of "MPA", but is still true when looking only at Marine Reserves as well. 
+<br> 
+```{r dives-mpa-and-frequency, message=F, warning=F, echo=F}
+dives_mpa_frequency <- ais_dives %>% 
+  filter(site_frequency == "high") %>% 
+  group_by(mpa_definition, year) %>% 
+  mutate(total_dives_year = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_dives_year)
+
+dive_mpa_plot <- ggplot(dives_mpa_frequency) + 
+  geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Year",
+       y="Proportion of Dives",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+dive_mpa_plot
+```
+<br> 
+
+Approximately 23% of high frequency sites fall within Marine Reserve areas. We might expect that if all high frequency sites were visited equally then about 23% of the dives in a given year at these high frequency sites would fall within an MPA. Somewhere between 28-36% of the dives in each year across high frequency sites are at sites within a Marine Reserve. When considering MPAs as Marine Reserves and Conservation Areas, ~38% of the high frequency sites are within MPAs and somewhere between 44 and 59% of the dives in each year across high frequency sites are at sites within a Marine Reserve or Conservation Area. This seems like a good signal for a more rigorous statistical evaluation of dive site preference. 
+
+### Time Trends
+
+A quick look at the difference in number of dives by site category (in MPA, in Buffer, Outside) by month to see if there is a signal for changing preference of dive site locations in October - February, but especially October, during lobster season. Data are separated by month, but are aggregated across 2016 - 2022 (i.e., data for October reflect all dives in October between 2016-2022). Note there is no data for December 2022, so December is only reflective of data from 2016-2021.  
+
+<br> 
+
+```{r time-trends, message=F, warning=F, echo=F}
+dives_over_time <- ais_dives %>% 
+  group_by(mpa_definition, month, site_category) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(month = factor(month, levels = c(1:12)))
+
+dives_time_plot <- ggplot(dives_over_time) + 
+  geom_col(aes(x=month, y=n_dives, fill=site_category)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Jan", "Feb", "March", "April", "May", "June",
+                              "July", "Aug", "Sept", "Oct", "Nov", "Dec"),
+                   ) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,600),
+                     breaks = seq(0,600,200)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x = "Month", 
+       y = "Number of Dives",
+       fill = "Site Category") + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle=90, vjust=0.5)) + 
+  facet_wrap(~mpa_definition)
+
+dives_time_plot
+```
+
+<br> 
+It seems like July - October are the months with the highest amount of diving activity. It also looks like the fraction of dives outside of MPAs is a little bit higher in October than other months with similar amounts of activity (e.g., July - September). 
 
 
 ## Old
