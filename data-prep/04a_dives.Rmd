@@ -40,7 +40,7 @@ This markdown takes the initial list of possible dive sites (all grid cells wher
   - Month: month of dive  
   - Year  
 
-We then look at defining vessel-specific "core" dive sites based on the frequency of visits per year. Finally, we match AIS positions to dive sites and add site specific information including nearest island, distance to shore, site category (in mpa, in buffer, outside), MPA name, and MPA type (Marine Reserve, Conservation Area).  
+We then look at defining "core" dive sites based on the frequency of visits per year. We do this looking at all vessels over all years and classifying the top 25% as "high" frequency, the next 25% as "medium" frequency, and the bottom 50% as "low" frequency. Finally, we match AIS positions to dive sites and add site specific information including nearest island, distance to shore, site category (in mpa, in buffer, outside), MPA name, and MPA type (Marine Reserve, Conservation Area).  
 
 # AIS Positions
 
@@ -79,6 +79,10 @@ GROUP BY ssvid, date, month, year, lat_bin, lon_bin"
 ais_locations <- bq_project_query("emlab-gcp", sql_ais_locations) %>% 
   bq_table_download(n_max = Inf)
 
+# Remove positions from Ranger, Sunfish, and Islander
+ais_locations <- ais_locations %>% 
+  filter(!ssvid %in% c(368926530, 338350134, 366813530))
+
 # Timestamps are in UTC - convert to Pacific time so we can classify as day or night based on California time 
 # Add overnight = yes or no 
 # Add time of day: early morning (before 6am), day (6am-6pm), night(after 6pm but not overnight), overnight
@@ -115,7 +119,7 @@ dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr
 ais_dives <- ais_locations %>% 
   # At least 1.5 hours in site 
   filter(total_hours >= 1.5) %>% 
-  inner_join(dive_sites, by = c("lat_bin", "lon_bin")) #10,070 dives 
+  inner_join(dive_sites, by = c("lat_bin", "lon_bin")) #8,747 dives 
 
 # Quick initial check 
 check <- ais_dives %>% 
@@ -125,84 +129,48 @@ check <- ais_dives %>%
 
 check_overnight <- ais_dives %>% 
   group_by(overnight) %>% 
-  count() #86% daytime 
+  count() #84% daytime 
 
 check_tod <- ais_dives %>% 
   group_by(time_of_day) %>% 
-  count() #77% during day 6am-6pm start time
+  count() #73% during day 6am-6pm start time
 ```
 
 # "Core" Dive Sites
 
-For the analysis we'll construct a series of subsets of the dive data, including a subset of "core" divesites that are most often used by the different vessels. To determine how many dives constitutes a "core" divesite, we first look at the distribution of number of dives per site per year for the different vessels.
+For the analysis we'll construct a series of subsets of the dive data, including a subset of "core" divesites that are most often used by the dive vessels. We look at aggregated number of dives across all 12 dive vessels in all years 2016-2022. We classify the top 25% of dive sites as "high" frequency, the next 25% as "medium" frequency, and the bottom 50% as "low" frequency.  
 
 ```{r define-core-site}
-dives_vessel_year <- ais_dives %>% 
-  group_by(ssvid, year, site_id) %>% 
-  count() %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname), by = "ssvid")
+# Count number of dives at each site aggregated 
+agg_site_visits <- ais_dives %>% 
+  group_by(site_id) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup()
 
-# Check max visits per site per year by vessel
-check <- dives_vessel_year %>% 
-  group_by(ssvid, year) %>% 
-  summarize(max_dives_per_site = max(n)) %>% 
+site_visits <- agg_site_visits$n_dives
+
+# Identify quantiles for number of visits 
+quants <- quantile(site_visits, probs = c(0, 0.25, 0.5, 0.75, 1))
+# Bottom 50% of sites have only 1 dive 
+# 75% of sites have or 3 less - middle > 1 and <= 3
+# Top 25% have 3+
+
+add_frequency <- agg_site_visits %>% 
+  mutate(site_frequency = case_when(n_dives == 1 ~ 'low',
+                                    n_dives > 1 & n_dives <= 3 ~ 'medium',
+                                    n_dives > 3 ~ 'high'))
+
+# Check 
+check_frequency <- add_frequency %>% 
+  group_by(site_frequency) %>% 
+  summarize(n_total = n()) %>% 
   ungroup() %>% 
-  left_join(vessel_info %>% 
-              dplyr::select(ssvid, shipname), by = "ssvid") %>% 
-  dplyr::select(shipname, ssvid, year, max_dives_per_site) %>% 
-  arrange(shipname, year)
+  mutate(approx_prop = n_total / 2528) # Pretty close: top 20%, next 25%, bottom 55%
 
-# Save to send to Doug/Molly
-write_csv(check, "max_dives_per_site_year_by_vessel.csv")
-
-ssvids <- unique(dives_vessel_year$ssvid)
-
-for(i in ssvids){
-  
-    vessel_year_dives <- dives_vessel_year %>% 
-      filter(ssvid == i)
-    
-    vessel_name <- unique(vessel_year_dives$shipname)
-    
-    vessel_hist <- ggplot(vessel_year_dives) + 
-      geom_histogram(aes(x=n)) + 
-      facet_wrap(~year, scales = 'free') +
-      labs(title = vessel_name)
-    
-    print(vessel_hist)
-}
-
-output <- NULL
-for(i in ssvids){
-  
-  vessel_year_dives <- dives_vessel_year %>% 
-    filter(ssvid == i)
-  
-  vessel_agg_dives <- dives_vessel_agg %>% 
-    filter(ssvid == i)
-  
-  vessel_name <- unique(vessel_year_dives$shipname)
-  
-  top20percent_year <- quantile(vessel_year_dives$n, 0.8)
-  top10percent_year  <- quantile(vessel_year_dives$n, 0.9)
-  
-  output_row <- data.frame(ssvid = i,
-                           shipname = vessel_name,
-                           n_visits_top20_percent = top20percent_year,
-                           n_visits_top10_percent = top10percent_year)
-  
-  output <- output %>% 
-    bind_rows(output_row)
-}
-
-## Test - how many core dive sites would we have per vessel if we used top 80% of visits. 
-test_core_sites <- dives_vessel_year %>% 
-  left_join(output %>% 
-              dplyr::select(ssvid, year_cutoff)) %>% 
-  mutate(core_site = ifelse(n >= year_cutoff, 'yes', 'no')) %>% 
-  group_by(shipname, year) %>% 
-  count(core_site)
+# Add frequency classification 
+ais_dives_frequency <- ais_dives %>% 
+  left_join(add_frequency %>% 
+              dplyr::select(site_id, site_frequency), by = "site_id")
 ```
 
 
@@ -215,12 +183,12 @@ reserves <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mp
 joint <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_reserves_conservation_areas.csv"))
 
 # Reserves
-ais_dives_reserves <- ais_dives %>% 
+ais_dives_reserves <- ais_dives_frequency %>% 
   left_join(reserves %>% 
               dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
 
 # Joint
-ais_dives_joint <- ais_dives %>% 
+ais_dives_joint <- ais_dives_frequency %>% 
   left_join(joint %>% 
               dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
 
@@ -233,7 +201,7 @@ all_ais_dives <- ais_dives_reserves %>%
   left_join(vessel_info %>% 
               dplyr::select(ssvid, shipname), by = "ssvid") %>% 
   dplyr::select(mpa_definition, ssvid, shipname, date, month, year, first_timestamp_pacific, last_timestamp_pacific, overnight, time_of_day,
-                site_id, site_category, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
+                site_id, site_category, site_frequency, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
                 mpa_id, mpa_name = name, mpa_type)
 
 # Save
@@ -241,6 +209,23 @@ write_csv(all_ais_dives, file.path(project_data_path, "processed", "ais-dives", 
 ```
 
 
+## Subset Dives
 
+For analysis we'll look at a subset of dives starting with only dives in the Northern Channel Islands, labeled as "day", where the vessel remained stationary in the dive site between 1.5 and 5 hours. This subset gives us 3,537 dives, or ~ 40% of the initial 8,747 AIS dives.  
+
+Around 56% of all AIS identified dives (4,890) are in the Northern Channel Islands. Of these 4,890 dives, 3,537 (or 72%) occurred during the day and have total time at the dive site between 1.5 and 5 hours.  
+
+```{r subset-dives}
+all_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+
+# Subset dives
+subset_dives <- all_dives %>% 
+  filter(island_group == 'Northern') %>% # 4890 dives
+  filter(time_of_day == 'day') %>% #3821 dives
+  filter(total_hours <= 5) #3537 dives
+
+# Save 
+write_csv(subset_dives, file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime.csv"))
+```
 
 
