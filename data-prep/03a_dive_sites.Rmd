@@ -60,7 +60,7 @@ This method is a rough adaptation of the GFW anchorage algorithm, more details a
 
 ## Bin Coordinates 
 
-We use AIS data from 2016 - November 30, 2022 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary.      
+We use AIS data from 2016 - November 30, 2022 gridded to 0.001 x 0.001 degrees and retrieve all positions where vessels are moving slower than 1 knot, which we consider positions where the vessel is stationary. We remove positions from vessels that we've discovered do mostly kayak or other types of non-diving trips: Ranger (368926530), Sunfish (338350134), and Islander (366813530)     
 
 ```{r sql-bin-locations, include=F}
 # Keeping only coordinates where vessels moved slower than 1 knot 2016-November 30, 2022
@@ -91,6 +91,10 @@ GROUP BY ssvid, date, lat_bin, lon_bin"
 # Run and download 
 binned_locations <- bq_project_query("emlab-gcp", sql_bin_locations) %>% 
   bq_table_download(n_max = Inf)
+
+# Remove positions from Ranger, Sunfish, and Islander
+binned_locations <- binned_locations %>% 
+  filter(!ssvid %in% c(368926530, 338350134, 366813530))
 ```
 
 ## Test Thresholds
@@ -348,6 +352,71 @@ check_islands <- ggplot() +
         axis.ticks = element_blank()) # Looks good 
 ```
 
+
+# Final Site List
+
+At this stage we only remove sites that are further than 10 km from shore. These sites will be further subset for analysis.  
+
+<br>   
+
+```{r site-harbor-overlap, include=F}
+# Unique dive sites 
+unique_sites <- dive_sites_island %>% 
+  mutate(site_type = 'AIS') #2556 sites
+
+# Remove sites > 10000 meters (10 km)
+dive_sites_final <- unique_sites %>% 
+  filter(avg_distance_shore_m <= 10000) %>%
+  mutate(island_group = ifelse(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"), "Northern", "Southern")) %>% 
+  # Make nearest island a factor based on island order
+  mutate(nearest_island = factor(nearest_island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa",
+                                                            "Santa Barbara", "San Nicolas", "Catalina", "San Clemente"))) %>% 
+  arrange(island_group, nearest_island) %>% 
+  # Fix numbering 
+  mutate(site_id = 1:nrow(.)) %>% 
+  dplyr::select(site_id, lat_bin, lon_bin, avg_distance_shore_m, nearest_island, island_group) #2528 sites
+
+## Check sites in Northern CI only
+check_north_ci <- dive_sites_final %>% 
+  filter(island_group == "Northern") #1440 sites
+```
+
+```{r dive-site-map}
+northern_ci <- ci_shp %>% 
+  filter(poly_id %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
+
+final_site_map <- ggplot() + 
+  #geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = northern_ci, fill = NA) + 
+  geom_point(data = check_north_ci,
+             aes(x=lon_bin,
+                 y=lat_bin,
+                 color = nearest_island),
+             alpha = 0.7,
+             size = 0.2) +
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_color_manual(values = c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF')) +
+  labs(x="",
+       y="",
+       color="") + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank())
+
+final_site_map
+```
+
+
+```{r save-site-list, include=F, eval=F}
+# Save
+write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
+```
+
+# Old 
+
+Delete once confirmed we don't need this 
+
 # GFW Anchorages
 
 Check for any existing GFW anchorages near the Channel Islands. Some of these probably represent harbors or ports and we wouldn't want to accidentally consider these as dive sites if vessels spend longer periods of time here.  
@@ -438,73 +507,4 @@ island_anchorages_clean %>%
   theme(axis.text = element_blank(),
         axis.ticks = element_blank())
 ```
-
-# Final Site List
-
-At this stage we only remove sites that overlap with known anchorages (29) and those that are further than 10 km from shore. These sites will be further subset for analysis.  
-
-<br>   
-
-```{r site-harbor-overlap, include=F}
-# Unique dive sites 
-unique_sites <- dive_sites_island %>% 
-  mutate(site_type = 'AIS') #2673 sites
-
-harbor_overlap <- unique_sites %>% 
-  left_join(island_anchorages_clean %>% 
-              dplyr::select(lat_bin, lon_bin, anchorage_gfw_label, anchorage_island, harbor)) %>% # Only 29 sites 
-  mutate(site_type = ifelse(!is.na(harbor), 'Harbor', site_type))
-
-# Remove sites that are harbors
-# Remove sites > 10000 meters (10 km)
-dive_sites_final <- harbor_overlap %>%
-  filter(site_type != "Harbor") %>%
-  filter(avg_distance_shore_m <= 10000) %>%
-  mutate(island_group = ifelse(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"), "Northern", "Southern")) %>% 
-  # Make nearest island a factor based on island order
-  mutate(nearest_island = factor(nearest_island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa",
-                                                            "Santa Barbara", "San Nicolas", "Catalina", "San Clemente"))) %>% 
-  arrange(island_group, nearest_island) %>% 
-  # Fix numbering 
-  mutate(site_id = 1:nrow(.)) %>% 
-  dplyr::select(site_id, lat_bin, lon_bin, avg_distance_shore_m, nearest_island, island_group) #2605 sites
-
-## Check sites in Northern CI only
-check_north_ci <- dive_sites_final %>% 
-  filter(island_group == "Northern") #1526 sites
-```
-
-```{r dive-site-map}
-northern_ci <- ci_shp %>% 
-  filter(poly_id %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
-
-final_site_map <- ggplot() + 
-  #geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = northern_ci, fill = NA) + 
-  geom_point(data = check_north_ci,
-             aes(x=lon_bin,
-                 y=lat_bin,
-                 color = nearest_island),
-             alpha = 0.7,
-             size = 0.2) +
-  scale_x_continuous(expand = c(0,0)) + 
-  scale_y_continuous(expand = c(0,0)) + 
-  scale_color_manual(values = c('#91D5DEFF', '#2E8289FF', '#B4674EFF', '#EAAE37FF')) +
-  labs(x="",
-       y="",
-       color="") + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-
-final_site_map
-```
-
-
-```{r save-site-list, include=F, eval=F}
-# Save
-write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
-```
-
-
  

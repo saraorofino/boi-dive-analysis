@@ -135,10 +135,10 @@ dive_sites_sf <- st_as_sf(dive_sites,
 
 ## Reserves only 
 # Dive sites within the MPA boundary 
-sites_in_reserve <- st_intersection(dive_sites_sf, reserves_nad83) #306 unique sites 
+sites_in_reserve <- st_intersection(dive_sites_sf, reserves_nad83) #278 unique sites 
 
 # Dive sites within the buffer 
-sites_in_reserve_buff <- st_intersection(dive_sites_sf, reserve_buff_boundary) #165 unique sites
+sites_in_reserve_buff <- st_intersection(dive_sites_sf, reserve_buff_boundary) #160 unique sites
 
 # Combine 
 dive_site_reserve_cat <- sites_in_reserve %>% 
@@ -149,7 +149,7 @@ dive_site_reserve_cat <- sites_in_reserve %>%
 # What sites aren't in MPAs or the buffer?
 ids <- dive_site_reserve_cat$site_id
 
-missing_ids <- setdiff(dive_sites$site_id, ids) #2,134 outside 
+missing_ids <- setdiff(dive_sites$site_id, ids) #2,090 outside 
 
 outside_reserve <- dive_sites_sf %>% 
   filter(site_id %in% missing_ids) %>% 
@@ -201,7 +201,7 @@ We then look at "in MPA" as being in either Federal/State Marine Reserves or Fed
 ```{r classify-dive-sites-joint, echo=F}
 ## Joint reserves and conservation areas 
 # Dive sites within the MPA boundary 
-sites_in_joint <- st_intersection(dive_sites_sf, mpa_join_nad83) #485 unique sites 
+sites_in_joint <- st_intersection(dive_sites_sf, mpa_join_nad83) #459 unique sites 
 
 # Dive sites within the buffer 
 sites_in_joint_buff <- st_intersection(dive_sites_sf, joint_buff_boundary) #283 unique sites
@@ -215,7 +215,7 @@ dive_site_joint_cat <- sites_in_joint %>%
 # What sites aren't in MPAs or the buffer?
 ids <- dive_site_joint_cat$site_id
 
-missing_ids <- setdiff(dive_sites$site_id, ids) #1,843 outside 
+missing_ids <- setdiff(dive_sites$site_id, ids) #1,793 outside 
 
 outside_joint <- dive_sites_sf %>% 
   filter(site_id %in% missing_ids) %>% 
@@ -228,7 +228,7 @@ all_site_joint_cat <- dive_site_joint_cat %>%
   arrange(site_id) %>% 
   # 6 sites within buffer of two Catalina State Conservation Areas
   # Combine names to keep correct number of sites 
-  mutate(name = ifelse(site_id %in% c(1893:1898), "Casino Point/Lover's Cove", name)) %>% 
+  mutate(name = ifelse(site_id %in% c(1808:1814), "Casino Point/Lover's Cove", name)) %>% 
   distinct()
 
 ## Save dive sites by category
