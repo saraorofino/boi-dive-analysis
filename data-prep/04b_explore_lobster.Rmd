@@ -1,0 +1,578 @@
+---
+title: "Explore Dives: Lobster"
+output: 
+  bookdown::html_document2:
+    toc: true
+    toc_float: true
+    number_sections: false
+    self_contained: true
+---
+
+```{r setup, include=F, message=F, warning=F}
+library(tidyverse)
+library(sf)
+library(paletteer)
+
+# Load source
+source(file.path(here::here(),"common.R"))
+
+# Shapefiles
+ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+
+# Data 
+dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
+ais_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+```
+
+## Overview 
+
+This document includes interactive maps and some exploratory graphs for 3 different subsets of the AIS-identified dive data. These subsets reflect 3 different lobster hunting scenarios. All data examined is focused on the Northern Channel Islands, with the following additional filters:   
+
+  - Scenario 1 October Only: All AIS dive data for the month of October (no time of day or maximum site time filters)     
+  - Scenario 2 Season: All AIS dive data for lobster season, roughly October to mid-March (no time of day or maximum site time filters)     
+  - Scenario 3 Season Night: Subset of Scenario 2 looking only for time of day at night or overnight (no maximum site filter)     
+
+Scenario 2/3: Lobster season dates 
+
+The official lobster season is the Saturday before the first Wednesday in October through the Wednesday immediately after March 15th. The specific dates vary by year so data are filtered according to the dates of lobster season in that year. 
+
+  - 2015/2016 season: October 3rd - March 16th   
+  - 2016/2017 season: October 1st - March 15th     
+  - 2017/2018 season: September 30th - March 21st   
+  - 2018/2019 season: September 29th - March 20th   
+  - 2019/2020 season: September 28th - March 18th 
+  - 2020/2021 season: October 3rd - March 17th      
+  - 2021/2022 season: October 2nd - March 16th   
+  - 2022/2023 season: October 1st - March 15th (data go through November 2022 so all October and November data are removed)   
+  
+```{r scenarios, message=F, warning=F, include=F}
+# Create scenarios
+## Scenario 1
+scenario1 <- ais_dives %>%
+  filter(island_group == 'Northern' & month == 10)
+
+## Scenario 2
+# Define lobster season
+lobster_season <- data.frame(start_year = c(2016:2022),
+                             start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
+                                            '2020-10-03', '2021-10-02', '2022-10-01'),
+                             end_year = c(2016:2022),
+                             end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
+                                          '2020-03-18', '2021-03-17', '2022-03-16'))
+
+# Join to dives data 
+scenario2 <- ais_dives %>% 
+  filter(island_group == 'Northern') %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
+  # Keep January 1st to end date and start date through December 31
+  filter(date > start_date | date < end_date)
+
+## Scenario 3
+scenario3 <- scenario2 %>% 
+  filter(time_of_day %in% c("night", "overnight"))
+```
+
+## Interactive Map
+
+Map of the Northern Channel Island MPAs and possible dive sites. The map includes the following layers:  
+
+  - `mpa_outline`: outline of MPA boundaries  
+  - `mpa_type`: type of MPA (e.g., Marine Reserve or Conservation Area)   
+  - `dive_sites`: possible dive sites identified through AIS (e.g., all sites where a vessel remained stationary for at least 90 minutes)  
+    - There are 1,440 possible dive sites identified in the Northern Channel Islands  
+  - `scenario1`: subset of dives matching Scenario 1 described above (October only; 834 dives)   
+  - `scenario2`: subset of dives matching Scenario 2 described above (lobster season; 1,711 dives)   
+  - `scenario3`: subset of dives matching Scenario 3 described above (lobster season night; 334 dives)   
+  
+Click the layers in the upper right hand corner to add layers to the map. Hover over MPAs in the `mpa_type` layer for MPA names, and over the dots in the `scenario` layers for more information about that dive (e.g., scenario, date, time of day). The `dive_sites` and the three `scenario` layers are clustered, zooming in on the map with uncluster them and reveal more of the detailed information.  
+
+<br>  
+```{r leaflet, echo=F, warning=F, message=F}
+library(leaflet)
+library(leaflet.providers)
+library(htmltools)
+
+# Northern Channel Islands
+north_ci <- ci_shp %>% 
+  filter(poly_id %in% c('San Miguel', 'Santa Rosa', 'Santa Cruz', 'Anacapa'))
+
+north_mpas <- mpa_shp %>% 
+  filter(!mpa_id %in% c(7599, 8688, 68808024:68808039, 68808268)) %>% 
+  mutate(mpa_type = factor(mpa_type, levels = c("Federal Marine Conservation Area", "Federal Marine Reserve",
+                                                "State Marine Reserve", "State Marine Conservation Area")))
+
+# North dive sites
+north_sites <- dive_sites %>% 
+  filter(island_group == "Northern") %>% 
+  rename(x=lon_bin,
+         y=lat_bin) %>% 
+  left_join(ais_dives %>% 
+              dplyr::select(site_id, site_frequency) %>% 
+              distinct(), by = "site_id")
+
+# AIS dives for one of two MPA scenarios 
+scenario1_dives <- scenario1 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  # Create a factor from site frequency 
+  mutate(site_frequency = factor(site_frequency, levels = c('high', 'medium', 'low')),
+         scenario = "Scenario 1") %>% 
+  mutate(scenario = factor(scenario, levels = c("Scenario 1", "Scenario 2", "Scenario 3"))) %>% 
+  rename(x=lon_bin,
+         y=lat_bin)
+
+scenario2_dives <- scenario2 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  # Create a factor from site frequency 
+  mutate(site_frequency = factor(site_frequency, levels = c('high', 'medium', 'low')),
+         scenario = "Scenario 2") %>% 
+  mutate(scenario = factor(scenario, levels = c("Scenario 1", "Scenario 2", "Scenario 3"))) %>% 
+  rename(x=lon_bin,
+         y=lat_bin)
+
+scenario3_dives <- scenario3 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  # Create a factor from site frequency 
+  mutate(site_frequency = factor(site_frequency, levels = c('high', 'medium', 'low')),
+         scenario = "Scenario 3") %>% 
+  mutate(scenario = factor(scenario, levels = c("Scenario 1", "Scenario 2", "Scenario 3"))) %>% 
+  rename(x=lon_bin,
+         y=lat_bin)  
+
+## Colors
+pal <- c('slategray3', 'tomato', 'darkcyan', 'firebrick')
+mpa_pal <- colorFactor(pal, north_mpas$mpa_type) 
+
+# Dive Site Frequency
+freq_pal <- hcl.colors(n=3, palette = "Heat")
+frequency_pal <- colorFactor(freq_pal, north_sites$site_frequency)
+
+# Scenario palette 
+scen_pal <- c("#4E7147FF", "#7DCCD3FF", "#BE9C9DFF")
+
+scen1_pal <- colorFactor(scen_pal, scenario1_dives$scenario)
+scen2_pal <- colorFactor(scen_pal, scenario2_dives$scenario)
+scen3_pal <- colorFactor(scen_pal, scenario3_dives$scenario)
+
+# ship_pal <- c(paletteer_d('nationalparkcolors::Arches', 5), paletteer_d('nationalparkcolors::CraterLake', 3), 
+#                    "#376597FF", "#E8C533FF", "#979461FF", "#CD5733FF", "#A12A19FF")
+# shipname_pal <- colorFactor(ship_pal, north_dives$shipname)
+
+## Map
+interactive_map <- leaflet() %>%
+  addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
+  addPolygons(data=north_mpas,
+              smoothFactor = 0.5,
+              opacity = 1,
+              weight = 1,
+              color = "grey60",
+              fillColor = NA,
+              group = "mpa_outline") %>% 
+  addPolygons(data=north_mpas,
+              smoothFactor = 0.5,
+              opacity = 1,
+              weight = 1,
+              color = ~mpa_pal(mpa_type),
+              fillColor = ~mpa_pal(mpa_type),
+              fillOpacity = 0.6,
+              group = "mpa_type",
+              label = paste("Name:", north_mpas$name)) %>% 
+  addCircleMarkers(data=north_sites,
+                   lng = north_sites$x,
+                   lat = north_sites$y,
+                   radius = 5,
+                   color = ~frequency_pal(site_frequency),
+                   fillColor = ~frequency_pal(site_frequency),
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "dive_sites",
+                   clusterOptions = markerClusterOptions()) %>%
+  addCircleMarkers(data=scenario1_dives,
+                   lng = scenario1_dives$x,
+                   lat = scenario1_dives$y,
+                   radius = 5,
+                   color = ~scen1_pal(scenario),
+                   fillColor = ~scen1_pal(scenario),
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "scenario1",
+                   label = paste("Scenario 1", "<br>", 
+                                 "Date:", scenario1_dives$date, "<br>",
+                                 "Time of Day:", scenario1_dives$time_of_day) %>%
+                     lapply(htmltools::HTML),
+                   clusterOptions = markerClusterOptions()) %>%
+  addCircleMarkers(data=scenario2_dives,
+                   lng = scenario2_dives$x,
+                   lat = scenario2_dives$y,
+                   radius = 5,
+                   color = ~scen2_pal(scenario),
+                   fillColor = ~scen2_pal(scenario),
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "scenario2",
+                   label = paste("Scenario 2", "<br>", 
+                                 "Date:", scenario2_dives$date, "<br>",
+                                 "Time of Day:", scenario2_dives$time_of_day) %>%
+                     lapply(htmltools::HTML),
+                   clusterOptions = markerClusterOptions()) %>%
+  addCircleMarkers(data=scenario3_dives,
+                   lng = scenario3_dives$x,
+                   lat = scenario3_dives$y,
+                   radius = 5,
+                   color = ~scen3_pal(scenario),
+                   fillColor = ~scen3_pal(scenario),
+                   stroke = FALSE,
+                   fillOpacity = 1,
+                   group = "scenario3",
+                   label = paste("Scenario 3", "<br>", 
+                                 "Date:", scenario3_dives$date, "<br>",
+                                 "Time of Day:", scenario3_dives$time_of_day) %>%
+                     lapply(htmltools::HTML),
+                   clusterOptions = markerClusterOptions()) %>%
+  addLegend("bottomright",
+            pal = mpa_pal,
+            values = north_mpas$mpa_type,
+            title = "MPA Type",
+            opacity = 1,
+            group = "mpa_type") %>% 
+  addLegend("bottomleft",
+            pal = frequency_pal,
+            values = north_sites$site_frequency,
+            title = "Site Frequency",
+            opacity = 1,
+            group = "dive_sites") %>%
+  addLegend("bottomleft",
+            pal = scen1_pal,
+            values = scenario1_dives$scenario,
+            title = "",
+            opacity = 1,
+            group = "scenario1") %>% 
+  addLegend("bottomleft",
+            pal = scen2_pal,
+            values = scenario2_dives$scenario,
+            title = "",
+            opacity = 1,
+            group = "scenario2") %>% 
+  addLegend("bottomleft",
+            pal = scen3_pal,
+            values = scenario3_dives$scenario,
+            title = "",
+            opacity = 1,
+            group = "scenario3") %>% 
+  addLayersControl(baseGroups = c("mpa_outline"), 
+                   overlayGroups = c("mpa_type", "dive_sites", "scenario1", "scenario2", "scenario3"),
+                   options = layersControlOptions(collapsed = FALSE)) %>% 
+  hideGroup("mpa_type") %>% 
+  hideGroup("dive_sites") %>% 
+  hideGroup("scenario1") %>% 
+  hideGroup("scenario2") %>% 
+  hideGroup("scenario3")
+
+interactive_map
+```
+
+## Exploratory 
+
+The following are just a few quick exploratory plots on the AIS identified dives. 
+
+### Core Sites {.tabset}
+
+The first plot compares the number of dives at high frequency, medium frequency, and low frequency sites for each of the three scenarios. High frequency are sites with the top 25% of visits (aggregated across all vessels and years), sites with more than 3 visits are considered "high frequency" and there are 222 high frequency sites. Medium frequency sites are the next 25% of visits, sites with more than one visit and 3 or less visits are considered "medium" frequency. There are 257 medium frequency sites. The remaining 518 sites, were only visited once and are considered low frequency sites. 
+
+The second plot looks at the proportion of sites by site frequency within each MPA classification (i.e., proportion of high frequency sites located within MPAs, in MPA buffers, or outside of MPAs). 
+
+Finally, we compare the number of dives by MPA classification for high frequency dive sites.    
+<br> 
+
+#### Scenario 1
+
+```{r core-sites-scen1, message=F, warning=F, echo=F}
+scen1_dives_frequency <- scenario1_dives %>% 
+  group_by(year, site_frequency) %>% 
+  dplyr::summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  group_by(year) %>% 
+  mutate(total_annual_dives = sum(n_dives)) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_annual_dives)
+
+scen1_dive_frequency_plot <- ggplot(data=scen1_dives_frequency) + 
+  geom_col(aes(x=year, y=n_dives, fill=site_frequency)) + 
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_fill_manual(values = freq_pal,
+                    labels = c("High", "Medium", "Low")) + 
+  labs(x="Year", 
+       y="Number of Dives",
+       fill="Site Frequency") + 
+  theme_bw()
+
+scen1_dive_frequency_plot
+```
+
+<br>   
+There are a larger fraction of dives to medium or low frequency spots in this scenario compared to the ecotourism, which would make sense if lobster hunting utilizes different sites (e.g. outside of mpas) than typical ecotourism dives.   
+<br> 
+
+```{r mpa-classification-core-sites-scen1, message=F, warning=F, echo=F}
+scen1_site_mpa_frequency <- scenario1 %>% 
+  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+  distinct() %>% 
+  group_by(mpa_definition, site_frequency) %>% 
+  mutate(total_sites_in_frequency = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  count() %>% 
+  mutate(prop_category = n / total_sites_in_frequency)
+
+scen1_site_mpa_plot <- ggplot(scen1_site_mpa_frequency) + 
+  geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Low", "Medium", "High")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Site Frequency",
+       y="Proportion of Sites",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen1_site_mpa_plot
+```
+
+<br>
+The trends shown in all of the ecotourism scenarios still apply here, with a higher proportion of the medium and high frequency sites being MPAs compared to the low frequency sites. Though there are more dives in the three lobster scenarios occurring at low or medium frequency sites compared to the ecotourism scenarios.   
+<br> 
+
+```{r dives-mpa-and-frequency-scen1, message=F, warning=F, echo=F}
+scen1_dives_mpa_frequency <- scenario1 %>% 
+  filter(site_frequency == "high") %>% 
+  group_by(mpa_definition, year) %>% 
+  mutate(total_dives_year = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_dives_year)
+
+scen1_dive_mpa_plot <- ggplot(scen1_dives_mpa_frequency) + 
+  geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Year",
+       y="Proportion of Dives",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen1_dive_mpa_plot
+```
+<br> 
+
+Approximately 23% of high frequency sites fall within Marine Reserve areas. We might expect that if all high frequency sites were visited equally then about 23% of the dives in a given year at these high frequency sites would fall within an MPA. Especially in 2016/2017 and 2021/2022 we see lower percentages of dives to sites within a Marine Reserve (around 14-16%). This trend is opposite of what we see in the ecotourism scenarios and aligns with the assumption that at the start of lobster hunting season a higher fraction of dive trips are targeting lobster and therefore diving outside of the no-take MPAs.  
+<br> 
+
+#### Scenario 2
+
+```{r core-sites-scen2, message=F, warning=F, echo=F}
+scen2_dives_frequency <- scenario2_dives %>% 
+  group_by(year, site_frequency) %>% 
+  dplyr::summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  group_by(year) %>% 
+  mutate(total_annual_dives = sum(n_dives)) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_annual_dives)
+
+scen2_dive_frequency_plot <- ggplot(data=scen2_dives_frequency) + 
+  geom_col(aes(x=year, y=n_dives, fill=site_frequency)) + 
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_fill_manual(values = freq_pal,
+                    labels = c("High", "Medium", "Low")) + 
+  labs(x="Year", 
+       y="Number of Dives",
+       fill="Site Frequency") + 
+  theme_bw()
+
+scen2_dive_frequency_plot
+```
+<br>   
+Similar to the first scenario, there seems to be higher proportions of medium and low site frequency in this scenario compared to the ecotourism scenarios.  
+<br> 
+
+```{r mpa-classification-core-sites-scen2, message=F, warning=F, echo=F}
+scen2_site_mpa_frequency <- scenario2 %>% 
+  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+  distinct() %>% 
+  group_by(mpa_definition, site_frequency) %>% 
+  mutate(total_sites_in_frequency = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  count() %>% 
+  mutate(prop_category = n / total_sites_in_frequency)
+
+scen2_site_mpa_plot <- ggplot(scen2_site_mpa_frequency) + 
+  geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Low", "Medium", "High")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Site Frequency",
+       y="Proportion of Sites",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen2_site_mpa_plot
+```
+
+<br>
+The trends shown in all of the ecotourism scenarios still apply here, with a higher proportion of the medium and high frequency sites being MPAs compared to the low frequency sites. Though there are more dives in the three lobster scenarios occurring at low or medium frequency sites compared to the ecotourism scenarios.   
+<br> 
+
+```{r dives-mpa-and-frequency-scen2, message=F, warning=F, echo=F}
+scen2_dives_mpa_frequency <- scenario2 %>% 
+  filter(site_frequency == "high") %>% 
+  group_by(mpa_definition, year) %>% 
+  mutate(total_dives_year = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_dives_year)
+
+scen2_dive_mpa_plot <- ggplot(scen2_dives_mpa_frequency) + 
+  geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Year",
+       y="Proportion of Dives",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen2_dive_mpa_plot
+```
+<br> 
+The trend shown in the first scenario of less visits to MPAs sites than might be expected based on the percentage of sites within the MPA is also seen in this scenario.     
+<br>   
+
+#### Scenario 3
+
+```{r core-sites-scen3, message=F, warning=F, echo=F}
+scen3_dives_frequency <- scenario3_dives %>% 
+  group_by(year, site_frequency) %>% 
+  dplyr::summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  group_by(year) %>% 
+  mutate(total_annual_dives = sum(n_dives)) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_annual_dives)
+
+scen3_dive_frequency_plot <- ggplot(data=scen3_dives_frequency) + 
+  geom_col(aes(x=year, y=n_dives, fill=site_frequency)) + 
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  scale_fill_manual(values = freq_pal,
+                    labels = c("High", "Medium", "Low")) + 
+  labs(x="Year", 
+       y="Number of Dives",
+       fill="Site Frequency") + 
+  theme_bw()
+
+scen3_dive_frequency_plot
+```
+<br> 
+There are a larger fraction of dives to medium or low frequency spots in this scenario compared to the ecotourism. This scenario is similar to the first scenario (October only), though an even higher fraction of dives are occurring in low or medium frequency sites in some years (e.g., 2019-2021).      
+<br> 
+
+
+```{r mpa-classification-core-sites-scen3, message=F, warning=F, echo=F}
+scen3_site_mpa_frequency <- scenario3 %>% 
+  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+  distinct() %>% 
+  group_by(mpa_definition, site_frequency) %>% 
+  mutate(total_sites_in_frequency = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  count() %>% 
+  mutate(prop_category = n / total_sites_in_frequency)
+
+scen3_site_mpa_plot <- ggplot(scen3_site_mpa_frequency) + 
+  geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Low", "Medium", "High")) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Site Frequency",
+       y="Proportion of Sites",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen3_site_mpa_plot
+```
+<br> 
+This seems to indicate that night dives occurring at high frequency sites (during lobster season) show opposite patterns to day time dives where fewer of the high frequency sites are within MPAs compared to low and medium frequency sites. This is the only scenario that is showing opposite patterns to the ecotourism scenarios.  
+<br> 
+```{r dives-mpa-and-frequency-scen3, message=F, warning=F, echo=F}
+scen3_dives_mpa_frequency <- scenario3 %>% 
+  filter(site_frequency == "high") %>% 
+  group_by(mpa_definition, year) %>% 
+  mutate(total_dives_year = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_dives_year)
+
+scen3_dive_mpa_plot <- ggplot(scen3_dives_mpa_frequency) + 
+  geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
+  scale_x_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022,1)) + 
+  scale_y_continuous(expand = c(0,0),
+                     limits = c(0,1)) + 
+  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
+                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  labs(x="Year",
+       y="Proportion of Dives",
+       fill = "Site Category") + 
+  theme_bw() + 
+  facet_wrap(~mpa_definition)
+
+scen3_dive_mpa_plot
+```
+<br> 
+This is the only scenario that has some years where no dives to high frequency sites are occurring at sites within an MPA. This seems to suggest that these night dives during lobster season are targeting lobsters, in particular in the later years 2020-2022. 
+<br> 
+
+
+
+
+
+
+
+
+
+
