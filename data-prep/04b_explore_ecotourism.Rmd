@@ -22,8 +22,8 @@ mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel
 
 # Data 
 dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
-ais_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
-scenario1  <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime.csv"))
+ais_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
+scenario1  <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
 ```
 
 ## Overview 

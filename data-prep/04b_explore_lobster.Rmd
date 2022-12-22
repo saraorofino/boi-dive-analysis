@@ -22,7 +22,11 @@ mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel
 
 # Data 
 dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
-ais_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022.csv"))
+ais_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
+
+# Different buffer scenarios
+ais_dives_1000 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_1000m.csv"))
+ais_dives_1500 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_1500m.csv"))
 ```
 
 ## Overview 
@@ -74,6 +78,62 @@ scenario2 <- ais_dives %>%
 ## Scenario 3
 scenario3 <- scenario2 %>% 
   filter(time_of_day %in% c("night", "overnight"))
+
+## Create scenarios for other two buffers and then add together for graphing comparisons
+scenario1_1000 <- ais_dives_1000 %>%
+  filter(island_group == 'Northern' & month == 10)
+
+scenario1_1500 <- ais_dives_1500 %>%
+  filter(island_group == 'Northern' & month == 10)
+
+scenario2_1000 <- ais_dives_1000 %>% 
+  filter(island_group == 'Northern') %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
+  # Keep January 1st to end date and start date through December 31
+  filter(date > start_date | date < end_date)
+
+scenario2_1500 <- ais_dives_1500 %>% 
+  filter(island_group == 'Northern') %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
+  # Keep January 1st to end date and start date through December 31
+  filter(date > start_date | date < end_date)
+
+scenario3_1000 <- scenario2_1000 %>% 
+  filter(time_of_day %in% c("night", "overnight"))
+
+scenario3_1500 <- scenario2_1500 %>% 
+  filter(time_of_day %in% c("night", "overnight"))
+
+## Combine 
+scenario1_combined <- scenario1 %>% 
+  mutate(buffer = '500 m') %>% 
+  bind_rows(scenario1_1000 %>% 
+              mutate(buffer = '1000 m')) %>% 
+  bind_rows(scenario1_1500 %>% 
+              mutate(buffer = '1500 m')) %>% 
+  mutate(buffer = factor(buffer, levels = c('500 m', '1000 m', '1500 m')))
+
+scenario2_combined <- scenario2 %>% 
+  mutate(buffer = '500 m') %>% 
+  bind_rows(scenario2_1000 %>% 
+              mutate(buffer = '1000 m')) %>% 
+  bind_rows(scenario2_1500 %>% 
+              mutate(buffer = '1500 m')) %>% 
+  mutate(buffer = factor(buffer, levels = c('500 m', '1000 m', '1500 m')))
+
+scenario3_combined <- scenario3 %>% 
+  mutate(buffer = '500 m') %>% 
+  bind_rows(scenario3_1000 %>% 
+              mutate(buffer = '1000 m')) %>% 
+  bind_rows(scenario3_1500 %>% 
+              mutate(buffer = '1500 m')) %>% 
+  mutate(buffer = factor(buffer, levels = c('500 m', '1000 m', '1500 m')))
 ```
 
 ## Interactive Map
@@ -290,11 +350,12 @@ Finally, we compare the number of dives by MPA classification for high frequency
 #### Scenario 1
 
 ```{r core-sites-scen1, message=F, warning=F, echo=F}
-scen1_dives_frequency <- scenario1_dives %>% 
-  group_by(year, site_frequency) %>% 
+scen1_dives_frequency <- scenario1_combined %>% 
+  filter(mpa_definition == 'Marine Reserve') %>% 
+  group_by(year, site_frequency, buffer) %>% 
   dplyr::summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  group_by(year) %>% 
+  group_by(year, buffer) %>% 
   mutate(total_annual_dives = sum(n_dives)) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_annual_dives)
@@ -308,8 +369,10 @@ scen1_dive_frequency_plot <- ggplot(data=scen1_dives_frequency) +
                     labels = c("High", "Medium", "Low")) + 
   labs(x="Year", 
        y="Number of Dives",
-       fill="Site Frequency") + 
-  theme_bw()
+       fill="Site Frequency") +
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  facet_wrap(~buffer)
 
 scen1_dive_frequency_plot
 ```
@@ -319,13 +382,13 @@ There are a larger fraction of dives to medium or low frequency spots in this sc
 <br> 
 
 ```{r mpa-classification-core-sites-scen1, message=F, warning=F, echo=F}
-scen1_site_mpa_frequency <- scenario1 %>% 
-  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+scen1_site_mpa_frequency <- scenario1_combined %>% 
+  dplyr::select(mpa_definition, buffer, site_id, site_category, site_frequency) %>% 
   distinct() %>% 
-  group_by(mpa_definition, site_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency) %>% 
   mutate(total_sites_in_frequency = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency)
 
@@ -341,7 +404,7 @@ scen1_site_mpa_plot <- ggplot(scen1_site_mpa_frequency) +
        y="Proportion of Sites",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen1_site_mpa_plot
 ```
@@ -351,12 +414,12 @@ The trends shown in all of the ecotourism scenarios still apply here, with a hig
 <br> 
 
 ```{r dives-mpa-and-frequency-scen1, message=F, warning=F, echo=F}
-scen1_dives_mpa_frequency <- scenario1 %>% 
+scen1_dives_mpa_frequency <- scenario1_combined %>% 
   filter(site_frequency == "high") %>% 
-  group_by(mpa_definition, year) %>% 
+  group_by(mpa_definition, buffer, year) %>% 
   mutate(total_dives_year = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  group_by(mpa_definition, buffer, year, site_category, total_dives_year) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_dives_year)
@@ -373,7 +436,7 @@ scen1_dive_mpa_plot <- ggplot(scen1_dives_mpa_frequency) +
        y="Proportion of Dives",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen1_dive_mpa_plot
 ```
@@ -385,11 +448,12 @@ Approximately 23% of high frequency sites fall within Marine Reserve areas. We m
 #### Scenario 2
 
 ```{r core-sites-scen2, message=F, warning=F, echo=F}
-scen2_dives_frequency <- scenario2_dives %>% 
-  group_by(year, site_frequency) %>% 
+scen2_dives_frequency <- scenario2_combined %>% 
+  filter(mpa_definition == 'Marine Reserve') %>% 
+  group_by(year, buffer, site_frequency) %>% 
   dplyr::summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  group_by(year) %>% 
+  group_by(year, buffer) %>% 
   mutate(total_annual_dives = sum(n_dives)) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_annual_dives)
@@ -404,7 +468,9 @@ scen2_dive_frequency_plot <- ggplot(data=scen2_dives_frequency) +
   labs(x="Year", 
        y="Number of Dives",
        fill="Site Frequency") + 
-  theme_bw()
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  facet_wrap(~buffer)
 
 scen2_dive_frequency_plot
 ```
@@ -413,13 +479,13 @@ Similar to the first scenario, there seems to be higher proportions of medium an
 <br> 
 
 ```{r mpa-classification-core-sites-scen2, message=F, warning=F, echo=F}
-scen2_site_mpa_frequency <- scenario2 %>% 
-  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+scen2_site_mpa_frequency <- scenario2_combined %>% 
+  dplyr::select(mpa_definition, buffer, site_id, site_category, site_frequency) %>% 
   distinct() %>% 
-  group_by(mpa_definition, site_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency) %>% 
   mutate(total_sites_in_frequency = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency)
 
@@ -435,7 +501,7 @@ scen2_site_mpa_plot <- ggplot(scen2_site_mpa_frequency) +
        y="Proportion of Sites",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen2_site_mpa_plot
 ```
@@ -445,12 +511,12 @@ The trends shown in all of the ecotourism scenarios still apply here, with a hig
 <br> 
 
 ```{r dives-mpa-and-frequency-scen2, message=F, warning=F, echo=F}
-scen2_dives_mpa_frequency <- scenario2 %>% 
+scen2_dives_mpa_frequency <- scenario2_combined %>% 
   filter(site_frequency == "high") %>% 
-  group_by(mpa_definition, year) %>% 
+  group_by(mpa_definition, buffer, year) %>% 
   mutate(total_dives_year = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  group_by(mpa_definition, buffer, year, site_category, total_dives_year) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_dives_year)
@@ -467,7 +533,7 @@ scen2_dive_mpa_plot <- ggplot(scen2_dives_mpa_frequency) +
        y="Proportion of Dives",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen2_dive_mpa_plot
 ```
@@ -478,11 +544,12 @@ The trend shown in the first scenario of less visits to MPAs sites than might be
 #### Scenario 3
 
 ```{r core-sites-scen3, message=F, warning=F, echo=F}
-scen3_dives_frequency <- scenario3_dives %>% 
-  group_by(year, site_frequency) %>% 
+scen3_dives_frequency <- scenario3_combined %>% 
+  filter(mpa_definition == 'Marine Reserve') %>% 
+  group_by(year, buffer, site_frequency) %>% 
   dplyr::summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  group_by(year) %>% 
+  group_by(year, buffer) %>% 
   mutate(total_annual_dives = sum(n_dives)) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_annual_dives)
@@ -497,7 +564,9 @@ scen3_dive_frequency_plot <- ggplot(data=scen3_dives_frequency) +
   labs(x="Year", 
        y="Number of Dives",
        fill="Site Frequency") + 
-  theme_bw()
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) + 
+  facet_wrap(~buffer)
 
 scen3_dive_frequency_plot
 ```
@@ -507,13 +576,13 @@ There are a larger fraction of dives to medium or low frequency spots in this sc
 
 
 ```{r mpa-classification-core-sites-scen3, message=F, warning=F, echo=F}
-scen3_site_mpa_frequency <- scenario3 %>% 
-  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+scen3_site_mpa_frequency <- scenario3_combined %>% 
+  dplyr::select(mpa_definition, buffer, site_id, site_category, site_frequency) %>% 
   distinct() %>% 
-  group_by(mpa_definition, site_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency) %>% 
   mutate(total_sites_in_frequency = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  group_by(mpa_definition, buffer, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency)
 
@@ -529,7 +598,7 @@ scen3_site_mpa_plot <- ggplot(scen3_site_mpa_frequency) +
        y="Proportion of Sites",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen3_site_mpa_plot
 ```
@@ -537,12 +606,12 @@ scen3_site_mpa_plot
 This seems to indicate that night dives occurring at high frequency sites (during lobster season) show opposite patterns to day time dives where fewer of the high frequency sites are within MPAs compared to low and medium frequency sites. This is the only scenario that is showing opposite patterns to the ecotourism scenarios.  
 <br> 
 ```{r dives-mpa-and-frequency-scen3, message=F, warning=F, echo=F}
-scen3_dives_mpa_frequency <- scenario3 %>% 
+scen3_dives_mpa_frequency <- scenario3_combined %>% 
   filter(site_frequency == "high") %>% 
-  group_by(mpa_definition, year) %>% 
+  group_by(mpa_definition, buffer, year) %>% 
   mutate(total_dives_year = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  group_by(mpa_definition, buffer, year, site_category, total_dives_year) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / total_dives_year)
@@ -559,7 +628,7 @@ scen3_dive_mpa_plot <- ggplot(scen3_dives_mpa_frequency) +
        y="Proportion of Dives",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition)
+  facet_grid(buffer ~ mpa_definition)
 
 scen3_dive_mpa_plot
 ```
