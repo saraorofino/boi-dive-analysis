@@ -18,7 +18,7 @@ source(file.path(here::here(),"common.R"))
 
 # Shapefiles
 ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
-mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
 
 # Data 
 dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
@@ -97,8 +97,7 @@ library(htmltools)
 north_ci <- ci_shp %>% 
   filter(poly_id %in% c('San Miguel', 'Santa Rosa', 'Santa Cruz', 'Anacapa'))
 
-north_mpas <- mpa_shp %>% 
-  filter(!mpa_id %in% c(7599, 8688, 68808024:68808039, 68808268)) %>% 
+mpa_shp <- mpa_shp %>% 
   mutate(mpa_type = factor(mpa_type, levels = c("Federal Marine Conservation Area", "Federal Marine Reserve",
                                                 "State Marine Reserve", "State Marine Conservation Area")))
 
@@ -141,7 +140,7 @@ scenario3_dives <- scenario3 %>%
 
 ## Colors
 pal <- c('slategray3', 'tomato', 'darkcyan', 'firebrick')
-mpa_pal <- colorFactor(pal, north_mpas$mpa_type) 
+mpa_pal <- colorFactor(pal, mpa_shp$mpa_type) 
 
 # Dive Site Frequency
 freq_pal <- hcl.colors(n=3, palette = "Heat")
@@ -161,14 +160,14 @@ scen3_pal <- colorFactor(scen_pal, scenario3_dives$scenario)
 ## Map
 interactive_map <- leaflet() %>%
   addProviderTiles(providers$Esri.WorldGrayCanvas) %>%
-  addPolygons(data=north_mpas,
+  addPolygons(data=mpa_shp,
               smoothFactor = 0.5,
               opacity = 1,
               weight = 1,
               color = "grey60",
               fillColor = NA,
               group = "mpa_outline") %>% 
-  addPolygons(data=north_mpas,
+  addPolygons(data=mpa_shp,
               smoothFactor = 0.5,
               opacity = 1,
               weight = 1,
@@ -176,7 +175,7 @@ interactive_map <- leaflet() %>%
               fillColor = ~mpa_pal(mpa_type),
               fillOpacity = 0.6,
               group = "mpa_type",
-              label = paste("Name:", north_mpas$name)) %>% 
+              label = paste("Name:", mpa_shp$name)) %>% 
   addCircleMarkers(data=north_sites,
                    lng = north_sites$x,
                    lat = north_sites$y,
@@ -231,7 +230,7 @@ interactive_map <- leaflet() %>%
                    clusterOptions = markerClusterOptions()) %>%
   addLegend("bottomright",
             pal = mpa_pal,
-            values = north_mpas$mpa_type,
+            values = mpa_shp$mpa_type,
             title = "MPA Type",
             opacity = 1,
             group = "mpa_type") %>% 
