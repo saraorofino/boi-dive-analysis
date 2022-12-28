@@ -16,6 +16,7 @@ knitr::opts_chunk$set(
 library(tidyverse)
 library(sf)
 library(tigris)
+library(stringr)
 
 # Load source
 source(file.path(here::here(),"common.R"))
@@ -171,10 +172,37 @@ mpa_map <- ggplot() +
         legend.position = 'bottom')
 ```
 
+```{r refine-mpas, message=F, warning=F}
+# Revise the no take designation for Fed. Conservation Area (some fishing allowed)
+# Add column for island 
+ci_mpas_labeled <- ci_mpas %>% 
+  mutate(fishing = ifelse(mpa_type == 'Federal Marine Conservation Area', 'Some Restrictions', fishing)) %>% 
+  mutate(no_take = ifelse(fishing == "No", "All", "Part")) %>%
+  mutate(island = case_when(str_detect(name, "Anacapa") ~ "Anacapa",
+                            str_detect(name, "Catalina") ~ "Catalina",
+                            str_detect(name, "Santa Rosa") ~ "Santa Rosa",
+                            str_detect(name, "Santa Cruz") ~ "Santa Cruz",
+                            str_detect(name, "San Miguel") ~ "San Miguel",
+                            str_detect(name, "Santa Barbara") ~ "Santa Barbara",
+                            str_detect(name, "San Nicolas") ~ "San Nicolas",
+                            name %in% c("Richardson Rock", "Harris Point") ~ "San Miguel",
+                            name %in% c("Scorpion", "Gull Island") ~ "Santa Cruz",
+                            name == "Channel Islands" ~ "Channel Islands",
+                            name == "Footprint" ~ "Anacapa",
+                            name == "South Point" ~ "Santa Rosa"))
+
+# Save North CI only
+north_ci_mpas <- ci_mpas_labeled %>% 
+  filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
+```
+
 
 ```{r save-mpas}
 # Save the mpa shapefile to project folder
-st_write(ci_mpas, file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+st_write(ci_mpas_labeled, file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+
+# Save north ci mpas
+st_write(north_ci_mpas, file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
 
 # Save map 
 ggsave(plot = mpa_map, filename = file.path(project_figure_path, "mpa_map.png"))

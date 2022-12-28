@@ -58,11 +58,6 @@ Map of Channel Islands MPAs based on the 2020 MPA Atlas. For determining if dive
 mpas <- mpa_shp %>% 
   filter(mpa_id != 8688)
 
-# Revise the no take designation for Fed. Conservation Area (some fishing allowed)
-mpas <- mpas %>% 
-  mutate(fishing = ifelse(mpa_type == 'Federal Marine Conservation Area', 'Some Restrictions', fishing)) %>% 
-  mutate(no_take = ifelse(fishing == "None", "All", "Part"))
-
 ggplot() + 
   geom_sf(data = ci_shp, fill = NA, color = 'black') + 
   geom_sf(data = mpas, aes(fill = mpa_type), alpha = 0.6) + 
