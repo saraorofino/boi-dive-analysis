@@ -73,7 +73,7 @@ scenario2 <- ais_dives %>%
   left_join(lobster_season %>% 
               dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
   # Keep January 1st to end date and start date through December 31
-  filter(date > start_date | date < end_date)
+  filter(date >= start_date | date <= end_date)
 
 ## Scenario 3
 scenario3 <- scenario2 %>% 
@@ -134,6 +134,13 @@ scenario3_combined <- scenario3 %>%
   bind_rows(scenario3_1500 %>% 
               mutate(buffer = '1500 m')) %>% 
   mutate(buffer = factor(buffer, levels = c('500 m', '1000 m', '1500 m')))
+
+## Save Scenario 3 for habitat selection model
+# Marine Reserves only 
+scen3_save <- scenario3 %>% 
+  filter(mpa_definition == "Marine Reserve")
+
+write_csv(scen3_save, file.path(project_data_path, "ais-dives-data-share", "ais_lobster_dives_north_ci.csv"))
 ```
 
 ## Interactive Map

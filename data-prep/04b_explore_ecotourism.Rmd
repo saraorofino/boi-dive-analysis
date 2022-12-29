@@ -12,6 +12,8 @@ output:
 library(tidyverse)
 library(sf)
 library(paletteer)
+library(colorspace)
+library(grDevices)
 
 # Load source
 source(file.path(here::here(),"common.R"))
@@ -48,10 +50,6 @@ The official lobster season is the Saturday before the first Wednesday in Octobe
   - 2022/2023 season: October 1st - March 15th (data go through November 2022 so all October and November data are removed)   
   
 ```{r scenarios, message=F, warning=F, include=F}
-# Create other subsets of data from scenario 1
-scenario2 <- scenario1 %>% 
-  filter(month != 10)
-
 # Define lobster season
 lobster_season <- data.frame(start_year = c(2016:2022),
                              start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
@@ -60,16 +58,36 @@ lobster_season <- data.frame(start_year = c(2016:2022),
                              end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
                                           '2020-03-18', '2021-03-17', '2022-03-16'))
 
-# Join to dives data 
+# Create other subsets of data from scenario 1
+scenario2 <- scenario1 %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>%
+  mutate(end_date = paste(year, "10", "31", sep = "-")) %>% 
+  # label which days to remove 
+  mutate(rm = case_when(year %in% c(2020, 2021, 2022) & date >= start_date & date <= end_date ~ "yes",
+                        year %in% c(2016,2017,2018,2019) & month == 10 ~ "yes",
+                        TRUE ~ "no")) %>% 
+  filter(rm == 'no') %>% 
+  dplyr::select(-start_date, -end_date, -rm)
+  
+
+
 scenario3 <- scenario1 %>% 
   left_join(lobster_season %>% 
               dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
   left_join(lobster_season %>% 
               dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
   # Filter out from start date through December 31 of same year
-  filter(date < start_date) %>% 
+  filter(date <= start_date) %>% 
   # Filter out from January 1st to end date 
-  filter(date > end_date)
+  filter(date >= end_date)
+
+## Save Scenario 2 for habitat selection model 
+# Marine Reserve and Conservation Areas 
+scen2_save <- scenario2 %>% 
+  filter(mpa_definition == 'Marine Reserves & Conservation Areas')
+
+write_csv(scen2_save, file.path(project_data_path, "ais-dives-data-share", "ais_ecotourism_dives_north_ci.csv"))
 ```
 
 ## Interactive Map
@@ -269,6 +287,71 @@ interactive_map <- leaflet() %>%
 
 interactive_map
 ```
+
+## Heatmaps
+
+```{r data-prep-heatmaps, warning=F, message=F, echo=F}
+# Northern sites by island
+sites_by_island <- dive_sites %>% 
+  filter(island_group == 'Northern') %>% 
+  group_by(nearest_island) %>% 
+  summarize(n_sites = n()) %>% 
+  ungroup()
+
+# Filter for just one set of dives
+scenario1_unique <- scenario1 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  group_by(year, month, site_id, nearest_island, lat_bin, lon_bin) %>% 
+  summarize(n_dives_at_site = n()) %>% 
+  ungroup() %>% 
+  group_by(year, month, nearest_island) %>% 
+  summarize(n_dives_total = sum(n_dives_at_site)) %>% 
+  ungroup() %>% 
+  left_join(sites_by_island, by = "nearest_island") %>% 
+  mutate(nearest_island = factor(nearest_island, levels = c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa")),
+         month = as.factor(month),
+         dive_ratio = n_dives_total / n_sites)
+
+scenario2_unique <- scenario2 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  group_by(site_id, lat_bin, lon_bin) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup()
+
+scenario3_unique <- scenario3 %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  group_by(site_id, lat_bin, lon_bin) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup()
+
+# Number of dives & dive sites by island
+scen1_summary <- scenario1_unique %>% 
+  group_by(nearest_island, n_dives) %>% 
+  summarize(n_dive_sites = n()) %>% 
+  ungroup()
+  
+```
+
+```{r heatmaps, message=F, warning=F, echo=F}
+scen1_heatmap <- ggplot() + 
+  geom_tile(data=scenario1_unique, aes(y=year, x=month, fill=dive_ratio)) + 
+  scale_y_continuous(expand = c(0,0),
+                     breaks = seq(2016,2022, by=1)) + 
+  scale_x_discrete(expand = c(0,0),
+                   labels = c("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                              "Jul", "Aug", "Sept", "Oct", "Nov", "Dec")) + 
+  scale_fill_continuous_sequential(palette = "Heat",
+                                   trans = "log") +
+  # scale_fill_continuous_divergingx(palette = 'RdYlBu', mid = 1, p1=0.2, p2=0.5,
+  #                                  breaks = seq(0,10,2),
+  #                                  limits = c(0,10)) + 
+  labs(x = "Month",
+       y = "Year",
+       fill = "Ratio Dives\nto Dive Sites") + 
+  facet_wrap(~nearest_island, scales = "free") +
+  theme_bw() 
+```
+
 
 ## Exploratory 
 
