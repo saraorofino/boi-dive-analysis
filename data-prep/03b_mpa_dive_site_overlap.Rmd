@@ -32,7 +32,7 @@ dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr
 ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
 
 # MPA Boundaries 
-mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp"))
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
 ```
 
 ## Overview 
@@ -115,7 +115,6 @@ joint_buff_500m <- st_buffer(mpa_join_nad83, dist=500)
 # Remove polygon to just get buffer
 joint_buff_boundary_500m <- rmapshaper::ms_erase(joint_buff_500m, mpa_join_nad83)
 
-
 ## 1000 m buffer
 # Buffer Marine Reserves 
 reserve_buff_1000m <- st_buffer(reserves_nad83, dist=1000)
@@ -133,6 +132,17 @@ reserve_buff_boundary_1500m  <- rmapshaper::ms_erase(reserve_buff_1500m, reserve
 ## Buffer combined Reserves and Conservation Areas
 joint_buff_1500m <- st_buffer(mpa_join_nad83, dist=1500)
 joint_buff_boundary_1500m <- rmapshaper::ms_erase(joint_buff_1500m, mpa_join_nad83)
+
+
+## Save 500 meter buffer 
+reserve_buff_save <- reserve_buff_boundary_500m %>% 
+  st_transform(crs = 4326)
+
+joint_buff_save <- joint_buff_boundary_500m %>% 
+  st_transform(crs = 4326)
+
+st_write(reserve_buff_save, file.path(project_data_path, "processed", "spatial", "reserve_buffer_500m.shp"))
+st_write(joint_buff_save, file.path(project_data_path, "processed", "spatial", "joint_buffer_500m.shp"))
 ```
 
 ## Classify Dive Sites
