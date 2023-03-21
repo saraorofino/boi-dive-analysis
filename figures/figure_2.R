@@ -73,6 +73,21 @@ avg_dives_high <- eco_sub %>%
   ungroup() %>% 
   mutate(prop_dives = n_dives / 3014)
 
+## Average frequency of high frequency dives in MPAs 
+avg_dives_high_mpas <- eco_sub %>% 
+  filter(site_frequency == "high") %>% 
+  group_by(mpa_definition, year) %>% 
+  mutate(total_dives_year = n()) %>% 
+  ungroup() %>% 
+  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup() %>% 
+  mutate(prop_dives = n_dives / total_dives_year) %>% 
+  filter(site_category == 'in_mpa') %>% 
+  group_by(mpa_definition) %>% 
+  summarize(avg_prop = mean(prop_dives)) %>% 
+  ungroup() #32% MR, 54% MCAs 
+
 # A: Proportion of dive sites by frequency and MPA category
 site_mpa_frequency <- eco_sub %>% 
   dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 

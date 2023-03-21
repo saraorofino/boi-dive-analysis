@@ -28,7 +28,7 @@ northern_ci <- ci_shp %>%
 northern_dive_sites <- dive_sites %>% 
   filter(nearest_island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
 
-# Aggregate grid size up to 10th degree 
+# Aggregate grid size up to 100th degree 
 sites_100th <- northern_dive_sites %>% 
   mutate(lat_bin = floor(lat_bin * 100) / 100,
          lon_bin = floor(lon_bin * 100) / 100) %>% 

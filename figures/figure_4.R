@@ -95,7 +95,7 @@ avg_dives_high_mpas <- lobster_sub %>%
                        prop_dives = rep(0,5))) %>% 
   group_by(mpa_definition) %>% 
   summarize(avg_prop = mean(prop_dives)) %>% 
-  ungroup()
+  ungroup() #7% MR, 13% MCAs
 
 # A: Proportion of dive sites by frequency and MPA category
 site_mpa_frequency <- lobster_sub %>% 
