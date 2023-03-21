@@ -22,7 +22,7 @@ library(stringr)
 source(file.path(here::here(),"common.R"))
 
 # Load shp 
-ci_shp <- st_read(file.path(project_data_path, "raw", "data_EPSG_4326", "california_islands.shp"))
+ci_shp <- st_read(file.path(project_data_path, "raw", "data_EPSG_4326", "channel_islands.shp"))
 
 # Load US counties shp 
 us_counties <- tigris::counties()
@@ -37,59 +37,26 @@ mpa_atlas <- st_read(file.path(emlab_data_dir, "mpa-atlas", "mpatlas_20201223_cl
 
 ## Channel Islands 
 
-Setup spatial files for the project. The shapefile for the Channel Islands was created by California Department of Fish and Wildlife and was downloaded from [Stanford's Digital Repository](https://purl.stanford.edu/nd958xt7750).  
+Setup spatial files for the project. The shapefile for the Channel Islands was created by California Department of Fish and Wildlife and was downloaded from [Stanford's Digital Repository](https://purl.stanford.edu/xw602fs2985).  
 
 ```{r}
-# Convert the linestring to multilinestring
-ci_multiline <- st_cast(ci_shp, "MULTILINESTRING")
-
-# Buffer it by 0 to turn linestrings into polygons 
-ci_buffer <- st_buffer(ci_multiline, dist = 0)
-
-# Add names to the polygons (based on county id)
-ci_polys <- ci_buffer %>% 
-  mutate(poly_num = case_when(COUNTY_ID == 520 ~ 1,
-                              COUNTY_ID == 530 ~ 2,
-                              COUNTY_ID == 519 ~ 3,
-                              COUNTY_ID == 527 | COUNTY_ID == 528 ~ 4,
-                              COUNTY_ID == 556 | COUNTY_ID == 557 ~ 5,
-                              COUNTY_ID == 570 ~ 6,
-                              COUNTY_ID == 559 ~ 7,
-                              COUNTY_ID == 576 ~ 8,
-                              TRUE ~ 9),
-         poly_id = case_when(COUNTY_ID == 520 ~ 'San Miguel',
-                             COUNTY_ID == 530 ~ 'Santa Rosa',
-                             COUNTY_ID == 519 ~ 'Santa Cruz',
-                             COUNTY_ID == 527 | COUNTY_ID == 528 ~ 'Anacapa',
-                             COUNTY_ID == 556 | COUNTY_ID == 557 ~ 'Santa Barbara',
-                             COUNTY_ID == 570 ~ 'San Nicolas',
-                             COUNTY_ID == 559 ~ 'Catalina',
-                             COUNTY_ID == 576 ~ 'San Clemente',
-                             TRUE ~ 'Farallons')) %>% 
-  filter(poly_id != 'Farallons') %>% 
-  group_by(poly_num, poly_id) %>% 
-  summarize(geometry = st_union(geometry))
-
-# Validate polygons 
-ci_polys_valid <- st_make_valid(ci_polys)
-ci_polys_valid <- st_as_sf(ci_polys_valid)
-
-# Bounding box 
-ci_bbox <- st_bbox(ci_polys_valid) #xmin -121, xmax = -118; ymin = 32.5, ymax=34.5
+# Convert name to island
+ci_poly <- ci_shp %>% 
+  rename(island = NAME)
 
 # Graph to check - looks pretty good 
 ggplot() + 
   geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_polys_valid, aes(color = poly_id), fill=NA) + 
+  geom_sf(data = ci_poly, aes(fill = NAME, color=NAME)) + 
   theme_classic()
 ```
 
 ```{r save}
 # Save the islands shapefile to project folder
-st_write(ci_polys_valid, file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
+st_write(ci_poly, file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
 
 # Convert geometry to wkt
-ci_bq <- ci_polys_valid %>% 
+ci_bq <- ci_polys %>% 
   mutate(boundary = st_as_text(geometry)) %>% 
   st_set_geometry(NULL)
 
@@ -143,7 +110,7 @@ ci_mpas <- mpa_atlas %>%
 
 # CI polygons
 ci_polys <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp")) %>% 
-  filter(poly_id != 'San Clemente')
+  filter(island != 'San Clemente')
 
 # Plot to check 
 ci_fed <- ci_mpas %>% 
