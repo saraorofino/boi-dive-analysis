@@ -171,6 +171,40 @@ check_frequency <- add_frequency %>%
 ais_dives_frequency <- ais_dives %>% 
   left_join(add_frequency %>% 
               dplyr::select(site_id, site_frequency), by = "site_id")
+
+
+## Frequency based on northern sites only 
+agg_n_site_visits <- ais_dives %>% 
+  filter(island_group == 'Northern') %>% 
+  group_by(site_id) %>% 
+  summarize(n_dives = n()) %>% 
+  ungroup()
+
+n_site_visits <- agg_nsite_visits$n_dives
+
+# Identify quantiles for number of visits 
+n_quants <- quantile(n_site_visits, probs = c(0, 0.25, 0.5, 0.75, 1))
+# Bottom 50% of sites have only 1 dive 
+# 75% of sites have 2 or less - middle = 2 (could still use > 1 and <= 3)
+# Top 25% have 2+ (but could still use 3+)
+
+add_frequency_north <- agg_n_site_visits %>% 
+  mutate(site_frequency = case_when(n_dives == 1 ~ 'low',
+                                    n_dives > 1 & n_dives <=3 ~ 'medium',
+                                    n_dives > 3 ~ 'high'))
+
+# Check 
+check_frequency_north <- add_frequency_north %>% 
+  group_by(site_frequency) %>% 
+  summarize(n_total = n()) %>% 
+  ungroup() %>% 
+  mutate(approx_prop = n_total / 1440) # 18%, 24%, 58%
+
+# Add frequency classification 
+ais_n_dives_frequency <- ais_dives %>% 
+  filter(island_group == 'Northern') %>% 
+  left_join(add_frequency_north %>% 
+              dplyr::select(site_id, site_frequency), by = "site_id")
 ```
 
 
@@ -179,21 +213,22 @@ ais_dives_frequency <- ais_dives %>%
 Lastly, add the relevant MPA information for each dive site  
 
 ```{r dive-site-info}
+# All dives 
 ## 500 meter buffer 
 reserves_500 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_reserves_500m.csv"))
 joint_500 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_500m.csv"))
 
-# Reserves
+### Reserves
 ais_dives_reserves_500 <- ais_dives_frequency %>% 
   left_join(reserves_500 %>% 
               dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
 
-# Joint
+### Joint
 ais_dives_joint_500 <- ais_dives_frequency %>% 
   left_join(joint_500 %>% 
               dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
 
-# Combine into single master dataset 
+### Combine into single master dataset 
 all_ais_dives_500 <- ais_dives_reserves_500 %>% 
   mutate(mpa_definition = "Marine Reserve") %>% 
   bind_rows(ais_dives_joint_500 %>% 
@@ -205,21 +240,47 @@ all_ais_dives_500 <- ais_dives_reserves_500 %>%
                 site_id, site_category, site_frequency, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
                 mpa_id, mpa_name = name, mpa_type)
 
-## 1000 meter buffer 
+
+# Northern dives 
+## 500 meter buffer 
+### Reserves
+ais_n_dives_reserves_500 <- ais_n_dives_frequency %>% 
+  left_join(reserves_500 %>% 
+              dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
+
+### Joint
+ais_n_dives_joint_500 <- ais_n_dives_frequency %>% 
+  left_join(joint_500 %>% 
+              dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
+
+### Combine into single master dataset 
+n_ais_dives_500 <- ais_n_dives_reserves_500 %>% 
+  mutate(mpa_definition = "Marine Reserve") %>% 
+  bind_rows(ais_n_dives_joint_500 %>% 
+              mutate(mpa_id = NA,
+                     mpa_definition = "Marine Reserves & Conservation Areas")) %>% 
+  left_join(vessel_info %>% 
+              dplyr::select(ssvid, shipname), by = "ssvid") %>% 
+  dplyr::select(mpa_definition, ssvid, shipname, date, month, year, first_timestamp_pacific, last_timestamp_pacific, overnight, time_of_day,
+                site_id, site_category, site_frequency, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
+                mpa_id, mpa_name = name, mpa_type)
+
+##### All dives only 
+# 1000 meter buffer 
 reserves_1000 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_reserves_1000m.csv"))
 joint_1000 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_1000m.csv"))
 
-# Reserves
+## Reserves
 ais_dives_reserves_1000 <- ais_dives_frequency %>% 
   left_join(reserves_1000 %>% 
               dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
 
-# Joint
+## Joint
 ais_dives_joint_1000 <- ais_dives_frequency %>% 
   left_join(joint_1000 %>% 
               dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
 
-# Combine into single master dataset 
+## Combine into single master dataset 
 all_ais_dives_1000 <- ais_dives_reserves_1000 %>% 
   mutate(mpa_definition = "Marine Reserve") %>% 
   bind_rows(ais_dives_joint_1000 %>% 
@@ -231,21 +292,21 @@ all_ais_dives_1000 <- ais_dives_reserves_1000 %>%
                 site_id, site_category, site_frequency, lat_bin, lon_bin, total_hours, avg_distance_shore_m, nearest_island, island_group, 
                 mpa_id, mpa_name = name, mpa_type)
 
-## 1500 meter buffer 
+# 1500 meter buffer 
 reserves_1500 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_reserves_1500m.csv"))
 joint_1500 <- read_csv(file.path(project_data_path, "processed", "dive_sites_by_mpa_category_joint_1500m.csv"))
 
-# Reserves
+## Reserves
 ais_dives_reserves_1500 <- ais_dives_frequency %>% 
   left_join(reserves_1500 %>% 
               dplyr::select(site_id, site_category, mpa_id, name, mpa_type), by = "site_id")
 
-# Joint
+## Joint
 ais_dives_joint_1500 <- ais_dives_frequency %>% 
   left_join(joint_1500 %>% 
               dplyr::select(site_id, site_category, name, mpa_type), by = "site_id")
 
-# Combine into single master dataset 
+## Combine into single master dataset 
 all_ais_dives_1500 <- ais_dives_reserves_1500 %>% 
   mutate(mpa_definition = "Marine Reserve") %>% 
   bind_rows(ais_dives_joint_1500 %>% 
@@ -259,6 +320,7 @@ all_ais_dives_1500 <- ais_dives_reserves_1500 %>%
 
 ## Save
 write_csv(all_ais_dives_500, file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
+write_csv(n_ais_dives_500, file.path(project_data_path, "processed", "ais-dives", "northern_ais_dives_2016_november_2022_500m.csv"))
 write_csv(all_ais_dives_1000, file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_1000m.csv"))
 write_csv(all_ais_dives_1500, file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_1500m.csv"))
 ```
@@ -271,11 +333,10 @@ For analysis we'll look at a subset of dives starting with only dives in the Nor
 Around 56% of all AIS identified dives (4,890) are in the Northern Channel Islands. Of these 4,890 dives, 3,537 (or 72%) occurred during the day and have total time at the dive site between 1.5 and 5 hours.  
 
 ```{r subset-dives}
-all_dives_500 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
+north_dives_500 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "northern_ais_dives_2016_november_2022_500m.csv"))
 
 # Subset dives
-subset_dives <- all_dives_500 %>% 
-  filter(island_group == 'Northern') %>% # 4890 dives
+subset_dives <- north_dives_500 %>% 
   filter(time_of_day == 'day') %>% #3821 dives
   filter(total_hours <= 5) #3537 dives
 
