@@ -43,7 +43,7 @@ eco_sub <- dives %>%
 ## Unique # of dives and dive sites
 unique_dives <- nrow(eco_sub)/2 #3014 unique dives (rows are duplicated for each of the 2 mpa definitions)
 unique_sites <- eco_sub %>% 
-  filter(mpa_definition == "Marine Reserve") %>% 
+  filter(mpa_definition != "Marine Reserve") %>% 
   dplyr::select(site_id) %>% 
   distinct() #807 unique sites 
 
@@ -56,7 +56,7 @@ sites_per_frequency <- eco_sub %>%
 
 ## Number of dives on at high frequency sites per year
 annual_dives_high <- eco_sub %>% 
-  filter(mpa_definition == 'Marine Reserve') %>% 
+  filter(mpa_definition != 'Marine Reserve') %>% 
   group_by(year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
@@ -67,11 +67,11 @@ annual_dives_high <- eco_sub %>%
 
 ## Average number of dives at high frequency sites 2016-2022
 avg_dives_high <- eco_sub %>% 
-  filter(mpa_definition == 'Marine Reserve') %>% 
+  filter(mpa_definition != 'Marine Reserve') %>% 
   group_by(site_frequency) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(prop_dives = n_dives / 3014)
+  mutate(prop_dives = n_dives / 3014) #75%
 
 ## Average frequency of high frequency dives in MPAs 
 avg_dives_high_mpas <- eco_sub %>% 
@@ -97,7 +97,9 @@ site_mpa_frequency <- eco_sub %>%
   ungroup() %>% 
   group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
-  mutate(prop_category = n / total_sites_in_frequency)
+  mutate(prop_category = n / total_sites_in_frequency) %>% 
+  # Keep only combined MR and MCA for updated figure 
+  filter(mpa_definition == 'Marine Reserves & Conservation Areas')
 
 site_mpa_plot <- ggplot(site_mpa_frequency) + 
   geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
@@ -111,9 +113,11 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
        y="Proportion of Dive Sites",
        fill = "") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition) + 
+  #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
+        axis.title = element_text(size=10),
+        axis.text = element_text(size=7),
         legend.position = "none") # one legend only 
 
 # B: proportion of high frequency dives by MPA category and year   
@@ -125,7 +129,9 @@ dives_mpa_frequency <- eco_sub %>%
   group_by(mpa_definition, year, site_category, total_dives_year) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(prop_dives = n_dives / total_dives_year)
+  mutate(prop_dives = n_dives / total_dives_year) %>% 
+  # Keep only combined MR and MCA for updated figure
+  filter(mpa_definition == 'Marine Reserves & Conservation Areas')
 
 dive_mpa_plot <- ggplot(dives_mpa_frequency) + 
   geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
@@ -139,10 +145,14 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
        y="Proportion of Dives",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition) + 
+  #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
-        legend.position = 'bottom')
+        legend.position = 'bottom',
+        axis.title = element_text(size=10),
+        axis.text = element_text(size=7),
+        legend.title = element_text(size=7),
+        legend.text = element_text(size=7))
 
 # Combine and save 
 figure_2 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
@@ -151,4 +161,4 @@ figure_2 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
 save_plot(plot = figure_2,
           filename = file.path(fig_path, "fig2.png"),
           dpi = 600,
-          base_height = 6, base_width = 6)
+          base_height = 6, base_width = 4)
