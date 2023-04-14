@@ -120,14 +120,16 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
                     labels = c("In Buffer", "In MPA", "Outside MPA")) + 
   labs(x="Site Frequency",
        y="Proportion of Dive Sites",
-       fill = "") + 
+       fill = "Site Category") + 
   theme_bw() + 
   #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
         axis.title = element_text(size=10),
         axis.text = element_text(size=7),
-        legend.position = "none") # one legend only 
+        legend.position = 'bottom',
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=9))  
 
 # B: proportion of high frequency dives by MPA category and year  
 dives_mpa_frequency <- lobster_sub %>% 
@@ -160,14 +162,14 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
         axis.title = element_text(size=10),
         axis.text = element_text(size=7),
         legend.position = 'bottom',
-        legend.title = element_text(size=7),
-        legend.text = element_text(size=7))
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=9))
 
 # Combine and save 
 figure_4 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
-  plot_layout(ncol=1)
+  plot_layout(nrow=1, guides = 'collect') & theme(legend.position = 'bottom')
 
 save_plot(plot = figure_4,
           filename = file.path(fig_path, "fig4.png"),
           dpi = 600,
-          base_height = 6, base_width = 4)
+          base_height = 4, base_width = 6)
