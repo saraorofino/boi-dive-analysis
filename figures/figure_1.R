@@ -8,6 +8,7 @@ library(tidyverse)
 library(here)
 library(sf)
 library(stringr)
+library(ggnewscale)
 
 source(file.path(here::here(),"common.R"))
 
@@ -20,6 +21,8 @@ ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_
 ci_nms <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp")) %>% 
   filter(mpa_id == 8688)
 mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
+ca_counties <- tigris::counties() %>% 
+  filter(GEOID %in% c('06083', '06111', '06037', '06029', '06079'))
 
 # Clean up data
 northern_ci <- ci_shp %>% 
@@ -31,6 +34,8 @@ mpa_types <- mpa_shp %>%
 
 # Map 
 ci_map <- ggplot() + 
+  geom_sf(data = ca_counties, fill = '#C9D2D3', 
+          color = '#B4B4B4', size = 1) + 
   geom_sf(data = ci_nms, aes(color=mpa_type),
           fill = NA, key_glyph = 'polygon', size = 1) +
   scale_color_manual(values = c('midnightblue'),
@@ -39,8 +44,10 @@ ci_map <- ggplot() +
   geom_sf(data = northern_ci, fill = '#C9D2D3', 
           color = '#B4B4B4', size = 1) + 
   geom_sf_text(data = northern_ci, aes(label = island), 
-               size=2, position = position_nudge(y = c(-0.005, 0, 0, -0.012),
+               size=1, position = position_nudge(y = c(-0.005, 0, 0, -0.012),
                                                  x = c(0, 0, 0, 0.04))) + 
+  geom_sf_text(data = ca_counties, aes(label = NAMELSAD),
+               size = 1) + 
   ggnewscale::new_scale_fill() + 
   ggnewscale::new_scale_color() + 
   geom_sf(data = mpa_types, aes(fill = mpa_type, color=mpa_type), 
@@ -56,11 +63,13 @@ ci_map <- ggplot() +
   theme_bw() + 
   theme(legend.margin=margin(0,0,0,0, unit="cm"),
         legend.position = 'bottom',
+        legend.title = element_text(size=5),
+        legend.text = element_text(size=5),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
-        panel.grid = element_blank()) + 
-  coord_sf(ylim = c(33.79, 34.21),
-           xlim = c(-120.61, -119.29))
+        panel.grid = element_blank()) +
+  coord_sf(ylim = c(33.79, 35.06),
+           xlim = c(-120.65, -118.7))
 
 ggsave(plot = ci_map,
        filename = file.path(fig_path, "fig1.png"),
