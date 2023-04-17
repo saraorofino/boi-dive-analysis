@@ -106,7 +106,9 @@ site_mpa_frequency <- lobster_sub %>%
   ungroup() %>% 
   group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
-  mutate(prop_category = n / total_sites_in_frequency)
+  mutate(prop_category = n / total_sites_in_frequency) %>% 
+  # Keep only MR for updated figure 
+  filter(mpa_definition == "Marine Reserve")
 
 site_mpa_plot <- ggplot(site_mpa_frequency) + 
   geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
@@ -118,12 +120,16 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
                     labels = c("In Buffer", "In MPA", "Outside MPA")) + 
   labs(x="Site Frequency",
        y="Proportion of Dive Sites",
-       fill = "") + 
+       fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition) + 
+  #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
-        legend.position = "none") # one legend only 
+        axis.title = element_text(size=10),
+        axis.text = element_text(size=7),
+        legend.position = 'bottom',
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=9))  
 
 # B: proportion of high frequency dives by MPA category and year  
 dives_mpa_frequency <- lobster_sub %>% 
@@ -134,7 +140,9 @@ dives_mpa_frequency <- lobster_sub %>%
   group_by(mpa_definition, year, site_category, total_dives_year) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(prop_dives = n_dives / total_dives_year)
+  mutate(prop_dives = n_dives / total_dives_year) %>% 
+  # Keep only MR for updated figure 
+  filter(mpa_definition == 'Marine Reserve')
 
 dive_mpa_plot <- ggplot(dives_mpa_frequency) + 
   geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
@@ -148,16 +156,20 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
        y="Proportion of Dives",
        fill = "Site Category") + 
   theme_bw() + 
-  facet_wrap(~mpa_definition) + 
+  #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
-        legend.position = 'bottom')
+        axis.title = element_text(size=10),
+        axis.text = element_text(size=7),
+        legend.position = 'bottom',
+        legend.title = element_text(size=9),
+        legend.text = element_text(size=9))
 
 # Combine and save 
 figure_4 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
-  plot_layout(ncol=1)
+  plot_layout(nrow=1, guides = 'collect') & theme(legend.position = 'bottom')
 
 save_plot(plot = figure_4,
           filename = file.path(fig_path, "fig4.png"),
           dpi = 600,
-          base_height = 6, base_width = 6)
+          base_height = 4, base_width = 6)
