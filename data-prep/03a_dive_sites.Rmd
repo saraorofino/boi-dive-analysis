@@ -413,98 +413,90 @@ final_site_map
 write_csv(dive_sites_final, file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))
 ```
 
-# Old 
 
-Delete once confirmed we don't need this 
+```{r check-sgsb-mpa-overlap, include=F}
+# Shps
+ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp")) %>% 
+  filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
+mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
 
-# GFW Anchorages
+# List of dive sites from Spotting Giant Sea Bass 
+seabass_sites <- read_xlsx(file.path(project_data_path, "raw", "SGSB_encounter_sites_reformatted.xlsx"),
+                           sheet = 'Sheet1') %>% 
+  clean_names()
 
-Check for any existing GFW anchorages near the Channel Islands. Some of these probably represent harbors or ports and we wouldn't want to accidentally consider these as dive sites if vessels spend longer periods of time here.  
+# Filter out missing locations
+seabass_sites <- seabass_sites %>% 
+  filter(!is.na(latitude) | !is.na(longitude))
 
-Main ports by Island: 
- - San Miguel: Cuyler Harbor  
- - Santa Rosa: Bechers Bay  
- - Santa Cruz: Prisoners Harbor and Scorpion  
- - Anacapa: East End Landing Cove  
- - Santa Barbara: Landing Cove  
- - Catalina: Two Harbors and Avalon  
- - San Clemente: Wilson Cove and Pyramid Cove  
-<br>   
-```{r query-anchorages, include=F}
-sql_anchorages <- "#StandardSQL
-  SELECT 
-    *
-  FROM 
-    `world-fishing-827.anchorages.named_anchorages_v20211026` 
-  WHERE (lon >= -121 AND lon <= -118)
-  AND (lat >= 32.5 AND lat <= 34.5)"
+# Dive sites as points
+seabass_sf <- st_as_sf(seabass_sites, coords = c("longitude", "latitude"),
+                       crs = 4326)
 
-anchorages <- bq_project_query("emlab-gcp",
-                               sql_anchorages) %>% 
-  bq_table_download(n_max = Inf)
+# Overlap with MPAs
+seabass_mpa <- st_intersection(seabass_sf, mpa_shp)
+
+# Classify sites in Channel Islands 
+seabass_sites <- seabass_sites %>% 
+  mutate(ci_site = case_when(str_detect(site_name, "Anacapa") ~ 'yes',
+                             str_detect(site_name, "Catalina") ~ 'yes',
+                             str_detect(site_name, "Channel Islands") ~ 'yes',
+                             str_detect(site_name, "San Clemente") ~ 'yes',
+                             str_detect(site_name, "San Nicolas") ~ 'yes',
+                             str_detect(site_name, "Santa Barbara") ~ 'yes',
+                             str_detect(site_name, "Santa Cruz") ~ 'yes',
+                             TRUE ~ 'no'),
+         island = case_when(str_detect(site_name, "Anacapa") ~ 'Anacapa',
+                            str_detect(site_name, "Catalina") ~ 'Catalina',
+                            str_detect(site_name, "Channel Islands") ~ 'Channel Islands',
+                            str_detect(site_name, "San Clemente") ~ 'San Clemente',
+                            str_detect(site_name, "San Nicolas") ~ 'San Nicolas',
+                            str_detect(site_name, "Santa Barbara") ~ 'Santa Barbara',
+                            str_detect(site_name, "Santa Cruz") ~ 'Santa Cruz',
+                            TRUE ~ 'NA'))
+# Filter for only CI sites
+ci_sites <- seabass_sites %>% 
+  filter(ci_site == 'yes') %>% 
+  mutate(in_mpa = ifelse(site_name %in% seabass_mpa$site_name, "yes", "no"))
+
+ci_sites_sf <- st_as_sf(ci_sites, coords = c("longitude", "latitude"),
+                        crs = 4326)
+
+
+# Map island MPAs, all SGSB sites in CI and sites in MPAs
+mpa_types <- mpa_shp %>% 
+  mutate(mpa_type = ifelse(str_detect(mpa_type, "Conservation"), "Marine Conservation Area", "Marine Reserve"))
+
+seabass_map <- ggplot() + 
+  geom_sf(data = ci_shp, fill = '#C9D2D3', 
+          color = '#B4B4B4', size = 1) + 
+  geom_sf(data = mpa_types,
+          aes(fill=mpa_type), color=NA,
+          alpha = 0.7) + 
+  geom_sf(data = ci_sites_sf, aes(color=in_mpa),
+          size = 1) + 
+  scale_fill_manual(values = c('darkcyan', 'firebrick'),
+                    guide = guide_legend(order = 1),
+                    name = "MPA Type") +
+  scale_color_manual(values = c("wheat4", "darkgreen"),
+                     labels = c("No", "Yes"),
+                     name = "In MPA") + 
+  scale_x_continuous(expand = c(0,0)) + 
+  scale_y_continuous(expand = c(0,0)) + 
+  labs(x="",
+       y="") + 
+  theme_bw() + 
+  theme(legend.margin=margin(0,0,0,0, unit="cm"),
+        legend.position = 'bottom',
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank()) + 
+  coord_sf(xlim = c(-119.35, -120.61),
+           ylim = c(33.8, 34.21))
+
+
+ggsave(plot = seabass_map, 
+       filename = file.path(project_figure_path, "northern_seabass_sites_mpa_overlap.png"))
 ```
 
-```{r identify-harbors}
-island_anchorages <- anchorages %>% 
-  filter(label %in% c('ANACAPA ISL', 'AVALON', 'AZ A', 'BF', 'BTAI', 'CATALINA IS',
-                      'ISTHMUS COVE', 'PRISONERS', 'SAN DIEGO', 'SAN MIGUEL IS',
-                      'SANTA BARBARA ISLAND', 'SANTA CATALINA IS', 'SANTA CRUZ ISLAND',
-                      'SANTA ROSA IS', 'SANTABARBARA', 'SCORPION ANCH', 'WHITES COVE CATALINA',
-                      'WILSON COVE')) %>% 
-  # 3 anchorages labeled 'San Deigo', 2 in SB county and one on San Clemente (keep)
-  filter(s2id != '80e8f09d' & s2id != '80eea361') %>% 
-  mutate(label = ifelse(label == 'ANACAPA ISL', 'SMUGGLERS COVE', label)) %>% 
-  # Enter lat/lon for Anacapa landing since this one is incorrect
-  bind_rows(data.frame(lat = 34.016622594287405, 
-                       lon = -119.36198187585457,
-                       label = 'ANACAPA'))
-
-# Clean up anchorages dataset 
-island_anchorages_clean <- island_anchorages %>% 
-  # 2 anchorages on Santa Cruz mislabeled with Catalina labels
-  mutate(label = case_when(s2id == '80e8fa5b' | s2id == '80e8fa45' ~ 'SANTA CRUZ ISLAND', 
-                           label == 'ANACAPA' ~ 'ANACAPA',
-                           TRUE ~ label)) %>% 
-  mutate(anchorage_island = case_when(label == 'SANTA BARBARA ISLAND' ~ "Santa Barbara",
-                                      label == 'SANTA ROSA IS' ~ "Santa Rosa",
-                                      label == 'SAN MIGUEL IS' ~ "San Miguel",
-                                      label == 'ANACAPA' ~ "Anacapa",
-                                      label == 'SAN DIEGO' | label == 'WILSON COVE' ~ "San Clemente",
-                                      label == 'AVALON' | label == 'CATALINA IS' | 
-                                      label == 'SANTA CATALINA IS' | label == 'WHITES COVE CATALINA' |
-                                      label == 'ISTHMUS COVE' ~ "Catalina",
-                                      TRUE ~ 'Santa Cruz'),
-         # Try and label the harbors 
-         harbor = case_when(label == 'SANTA ROSA IS' ~ 'Bechers Bay',
-                            label == 'SAN MIGUEL IS' ~ 'Cuyler Harbor',
-                            label == 'ANACAPA' ~ 'East End Landing Cove',
-                            label == 'SANTA BARBARA ISLAND' ~ 'Landing Cove',
-                            label == 'AVALON' ~ 'Avalon',
-                            label == 'ISTHMUS COVE' ~ 'Two Harbors',
-                            label == 'WILSON COVE' ~ 'Wilson Cove', 
-                            label == 'SAN DIEGO' ~ 'Pyramid Cove',
-                            label == 'PRISONERS' ~ 'Prisoners Harbor', 
-                            label == 'SCORPION ANCH' ~ 'Scorpion Anchorage',
-                            s2id %in% c('80e8fa5b', '80e8fa45') ~ 'Scorpion Anchorage',
-                            TRUE ~ 'Other'),
-         lat_bin = floor(lat * 1000) / 1000 + 0.0005,
-         lon_bin = floor(lon * 1000) / 1000 + 0.0005) %>% 
-  dplyr::select(lat, lon, anchorage_id = s2id, anchorage_gfw_label = label, anchorage_island,
-                total_visits, unique_stationary_ssvid, unique_stationary_fishing_ssvid, 
-                unique_active_ssvid, unique_total_ssvid, harbor, lat_bin, lon_bin)
-
-# Check on map 
-island_anchorages_clean %>% 
-  filter(harbor != 'Other') %>% 
-  ggplot() + 
-  geom_sf(data = ca_counties, fill = NA) + 
-  geom_sf(data = ci_shp, fill = NA) + 
-  geom_point(aes(x=lon, y=lat, color = harbor), alpha = 0.6) +
-  labs(x = "",
-       y = "",
-       color = '') + 
-  theme_bw() +
-  theme(axis.text = element_blank(),
-        axis.ticks = element_blank())
-```
  
