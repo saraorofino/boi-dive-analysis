@@ -175,5 +175,65 @@ st_write(north_ci_mpas, file.path(project_data_path, "processed", "spatial", "no
 ggsave(plot = mpa_map, filename = file.path(project_figure_path, "mpa_map.png"))
 ```
 
+## Anchorages
+
+Get locations of major ports/harbors for the Channel Islands, and in Santa Barbara, Ventura, and Los Angeles counties. Use GFW anchorages data to try and find the main ports.  
+
+Main ports by Island: 
+ - San Miguel: Cuyler Harbor  
+ - Santa Rosa: Bechers Bay  
+ - Santa Cruz: Prisoners Harbor and Scorpion  
+ - Anacapa: East End Landing Cove  
+ - Santa Barbara: Landing Cove  
+ - Catalina: Two Harbors and Avalon  
+ - San Clemente: Wilson Cove and Pyramid Cove  
+ 
+Mainland ports:   
+  - Santa Barbara harbor   
+  - Ventura harbor   
+  - Port Hueneme   
+  - Port of Long Beach   
+  - Port of Los Angeles   
+<br>   
+
+```{r identify-harbors}
+# Island ports
+# These are just for plotting - get coordinates from google maps 
+island_anchorages <- data.frame(harbor = c('Cuyler Harbor', 'Bechers Bay', 'Prisoners Harbor', 'Scorpion', 'Landing Cove',
+                                           'Landing Cove', 'Two Harbors', 'Avalon', 'Wilson Cove', 'Pyramid Cove'),
+                                island = c('San Miguel', 'Santa Rosa', 'Santa Cruz', 'Santa Cruz', 'Anacapa',
+                                           'Santa Barbara', 'Catalina', 'Catalina', 'San Clemente', 'San Clemente'),
+                                lat = c(34.051, 34.008, 34.023, 34.048, 34.017,
+                                        33.482, 33.442, 33.346, 33.006, 32.823),
+                                lon = c(-120.351, -120.047, -119.684, -119.553, -119.362,
+                                        -119.030, -118.498, -118.323, -118.557, -118.385))
+
+# Mainland ports
+mainland_anchorages <- data.frame(harbor = c("Santa Barbara Harbor", "Ventura Harbor", "Port Hueneme",
+                                             "Port of Los Angeles", "Port of Long Beach"),
+                                  lat = c(34.406, 34.244, 34.144,
+                                          33.708, 33.724),
+                                  lon = c(-119.686, -119.270, -119.213,
+                                          -118.265, -118.211))
+
+# Combine ports/harbors
+combined_harbors <- island_anchorages %>% 
+  bind_rows(mainland_anchorages)
+
+# Check on map 
+ggplot() + 
+  geom_sf(data = ca_counties, fill = NA) + 
+  geom_sf(data = ci_shp, fill = NA) + 
+  geom_point(data = combined_harbors, aes(x=lon, y=lat, color = harbor)) +
+  labs(x = "",
+       y = "",
+       color = '') + 
+  theme_bw() +
+  theme(axis.text = element_blank(),
+        axis.ticks = element_blank()) #Looks pretty good
+
+# Save anchorages
+write_csv(combined_harbors, file.path(project_data_path, "processed", "spatial", "harbors.csv"))
+```
 
 
