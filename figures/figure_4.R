@@ -53,49 +53,52 @@ sites_per_frequency <- lobster_sub %>%
   group_by(site_frequency) %>% 
   count() # 79 high, 75 medium, 95 low 
 
-## Number of dives on at high frequency sites per year
-annual_dives_high <- lobster_sub %>% 
+## Number of outside MPA sites per frequency category 
+outside_mpa_sites <- lobster_sub %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
+  dplyr::select(site_id, site_frequency, site_category) %>% 
+  distinct() %>% 
+  group_by(site_frequency) %>% 
+  mutate(total_sites = n()) %>% 
+  ungroup() %>% 
+  filter(site_category == 'outside_mpa') %>% 
+  group_by(site_frequency, total_sites) %>% 
+  summarize(sites_outside_mpas = n()) %>% 
+  ungroup() %>% 
+  mutate(frac_outside = sites_outside_mpas / total_sites)
+
+## High frequency sites in MPAs
+mpa_sites <- lobster_sub %>% 
+  filter(mpa_definition == "Marine Reserve" &
+           site_frequency == 'high') %>% 
+  dplyr::select(site_id, site_frequency, site_category) %>% 
+  distinct() %>% 
+  group_by(site_frequency) %>% 
+  mutate(total_sites = n()) %>% 
+  ungroup() %>% 
+  group_by(site_frequency, total_sites, site_category) %>% 
+  summarize(n_sites = n()) %>% 
+  ungroup() %>% 
+  mutate(frac_sites = n_sites / total_sites)
+
+## Average frequency of dives by site catgory 
+avg_dives_category <- lobster_sub %>% 
   filter(mpa_definition == 'Marine Reserve') %>% 
   group_by(year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
-  group_by(year, annual_dives, site_frequency) %>% 
-  summarize(n_dives = n()) %>% 
+  group_by(year, site_category, annual_dives) %>% 
+  summarize(n_dives_category = n()) %>% 
   ungroup() %>% 
-  mutate(prop_dives = n_dives / annual_dives) #27-56% by year
-
-## Average number of dives at high frequency sites 2016-2022
-avg_dives_high <- lobster_sub %>% 
-  filter(mpa_definition == 'Marine Reserve') %>% 
-  group_by(site_frequency) %>% 
-  summarize(n_dives = n()) %>% 
-  ungroup() %>% 
-  mutate(prop_dives = n_dives / 346)
-
-## Average frequency of high frequency dives in MPAs 
-avg_dives_high_mpas <- lobster_sub %>% 
-  filter(site_frequency == "high") %>% 
-  group_by(mpa_definition, year) %>% 
-  mutate(total_dives_year = n()) %>% 
-  ungroup() %>% 
-  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
-  summarize(n_dives = n()) %>% 
-  ungroup() %>% 
-  mutate(prop_dives = n_dives / total_dives_year) %>% 
-  filter(site_category == 'in_mpa') %>% 
-  # Add in years that were zero 
-  bind_rows(data.frame(mpa_definition = c("Marine Reserve", "Marine Reserve", "Marine Reserve", 
-                                          "Marine Reserves & Conservation Areas", "Marine Reserves & Conservation Areas"),
-                       year = c(2020, 2021, 2022,
-                                2020, 2021),
-                       site_category = rep("in_mpa", 5),
-                       total_dives_year = c(7, 6, 17,
-                                            7, 6),
-                       n_dives = rep(0,5),
-                       prop_dives = rep(0,5))) %>% 
-  group_by(mpa_definition) %>% 
-  summarize(avg_prop = mean(prop_dives)) %>% 
-  ungroup() #7% MR, 13% MCAs
+  bind_rows(data.frame(year=c(2020, 2020),
+                       site_category=c('in_mpa', 'in_buffer'),
+                       annual_dives=c(17,17),
+                       n_dives_category=c(0,0))) %>% 
+  mutate(frac_dives = n_dives_category / annual_dives) %>% 
+  group_by(site_category) %>% 
+  summarize(n_dives = sum(n_dives_category),
+            avg_frac = mean(frac_dives)) %>% 
+  ungroup()
 
 # A: Proportion of dive sites by frequency and MPA category
 site_mpa_frequency <- lobster_sub %>% 
@@ -131,16 +134,15 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
         legend.title = element_text(size=9),
         legend.text = element_text(size=9))  
 
-# B: proportion of high frequency dives by MPA category and year  
+# B: proportion of dives by MPA category and year  
 dives_mpa_frequency <- lobster_sub %>% 
-  filter(site_frequency == "high") %>% 
   group_by(mpa_definition, year) %>% 
-  mutate(total_dives_year = n()) %>% 
+  mutate(annual_dives = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, year, site_category, total_dives_year) %>% 
+  group_by(mpa_definition, year, site_category, annual_dives) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
-  mutate(prop_dives = n_dives / total_dives_year) %>% 
+  mutate(prop_dives = n_dives / annual_dives) %>% 
   # Keep only MR for updated figure 
   filter(mpa_definition == 'Marine Reserve')
 
