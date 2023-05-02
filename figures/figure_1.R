@@ -22,13 +22,17 @@ ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_
 ci_nms <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands_mpas.shp")) %>% 
   filter(mpa_id == 8688)
 mpa_shp <- st_read(file.path(project_data_path, "processed", "spatial", "north_channel_islands_mpas.shp"))
-ca_counties <- tigris::counties() %>% 
-  filter(GEOID %in% c('06083', '06111', '06037'))
+ca_counties <- st_read(file.path(project_data_path, "raw", "California_County_Boundaries", "cnty19_1.shp")) %>% 
+  filter(COUNTY_NAM %in% c("Santa Barbara", "Ventura") &
+           is.na(ISLAND)) %>% 
+  mutate(map_lab = ifelse(COUNTY_NAM == "Santa Barbara", "Santa Barbara County", 'Ventura County'))
 
 # Harbors
 harbors <- read_csv(file.path(project_data_path, "processed", "spatial", "harbors.csv"))
 
 # Clean up data
+ca_counties <- st_transform(ca_counties, crs = 4326)
+
 northern_ci <- ci_shp %>% 
   filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
 
@@ -38,8 +42,8 @@ mpa_types <- mpa_shp %>%
 harbors_north <- harbors %>% 
   filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa") |
            is.na(island)) %>% 
-  # Remove port hueneme
-  filter(harbor != 'Port Hueneme') %>% 
+  # Remove the LA ports and Port Hueneme (won't show up on the map)
+  filter(!harbor %in% c('Port Hueneme', 'Port of Los Angeles', 'Port of Long Beach')) %>% 
   # Make labels two lines 
   mutate(harbor_lab = case_when(harbor == "Santa Barbara Harbor" ~ "Santa Barbara\nHarbor",
                                 harbor == "Ventura Harbor" ~ "Ventura\nHarbor",
@@ -56,18 +60,18 @@ northern_mpas <- mpa_shp %>%
 ci_map <- ggplot() + 
   geom_sf(data = ca_counties, fill = '#C9D2D3',
           color = '#B4B4B4', size = 1) +
+  geom_sf(data = northern_ci, fill = '#C9D2D3',
+          color = '#B4B4B4', size = 1) +
   geom_sf(data = ci_nms, aes(color=mpa_type),
-          fill = NA, key_glyph = 'polygon', size = 1) +
+          fill = NA, key_glyph = 'polygon', size = 1.5) +
   scale_color_manual(values = c('midnightblue'),
                      guide = guide_legend(order = 2),
                      name = "") +
-  geom_sf(data = northern_ci, fill = '#C9D2D3',
-          color = '#B4B4B4', size = 1) +
   geom_sf_text(data = northern_ci, aes(label = island), 
                size=1, position = position_nudge(y = c(-0.005, 0, 0, -0.012),
                                                  x = c(0, 0, 0, 0.01))) + 
-  geom_sf_text(data = ca_counties, aes(label = NAMELSAD),
-               size = 1, position = position_nudge(y = c(-0.28,-0.01),
+  geom_sf_text(data = ca_counties, aes(label = map_lab),
+               size = 1, position = position_nudge(y = c(-0.27,0),
                                                    x = c(0,0))) +
   ggnewscale::new_scale_fill() + 
   ggnewscale::new_scale_color() + 
@@ -80,14 +84,14 @@ ci_map <- ggplot() +
                      guide = guide_legend(order = 1),
                      name = "MPA Type") + 
   geom_point(data = harbors_north, aes(x=lon, y=lat),
-             size = 0.1, position = position_nudge(y = c(0,-0.01,0,0,-0.01,
-                                                       -0.07,-0.01),
+             size = 0.1, position = position_nudge(y = c(0,-0.01,0,0,0,
+                                                       -0.01,0.06),
                                                  x = c(0,0.01,0.01,0,0,
                                                        0,-0.1))) +
   geom_text(data = harbors_north, aes(x=lon, y=lat, label=harbor_lab),
-            size = 1, position = position_nudge(y = c(0.02,-0.01,0.015,0.005,-0.019,
-                                                       -0.095,-0.035),
-                                                   x = c(0.02,0.06,0.04,0.037,0.039,
+            size = 1, position = position_nudge(y = c(0.02,-0.01,0.015,0.005,0,
+                                                       -0.028,0.042),
+                                                   x = c(0.02,0.06,0.04,0.037,0.035,
                                                          0,-0.1))) +
   labs(x="",
        y="") + 
@@ -98,8 +102,8 @@ ci_map <- ggplot() +
         legend.text = element_text(size=5),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
-        panel.grid = element_blank()) +
-  coord_sf(ylim = c(33.79, 34.42),
+        panel.grid = element_blank()) + 
+  coord_sf(ylim = c(33.79, 34.45),
            xlim = c(-120.65, -119.05))
 
 ggsave(plot = ci_map,
