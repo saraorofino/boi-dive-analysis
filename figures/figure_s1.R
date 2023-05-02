@@ -42,3 +42,13 @@ frequency_plot <- ggplot(agg_site_visits) +
   labs(x="Number of Dives at Site",
        y="Number of Sites") + 
   theme_bw()
+
+# Histogram
+dives_hist <- ggplot(agg_site_visits) + 
+  geom_histogram(aes(x=n_dives), boundary=0, binwidth = 1) + 
+  scale_x_continuous(expand=c(0,0),
+                     breaks = seq(1,125,2)) + 
+  scale_y_continuous(expand=c(0,0)) + 
+  labs(x="Number of Dives at Site",
+       y="Number of Sites") + 
+  theme_bw()
