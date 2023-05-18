@@ -7,6 +7,7 @@
 # Pacakges
 library(tidyverse)
 library(here)
+library(paletteer)
 library(patchwork)
 library(cowplot)
 
@@ -14,6 +15,10 @@ source(file.path(here::here(),"common.R"))
 
 # Final figures path 
 fig_path <- file.path(project_figure_path, "final")
+
+# Colors
+pal <- c("#F4E7C5FF", "#ACC2CFFF", "#678096FF")
+greypal <- DescTools::ColToGray(pal) #make sure colors are distinct in greyscale 
 
 # Data
 dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
@@ -94,7 +99,8 @@ site_mpa_frequency <- eco_sub %>%
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency) %>% 
   # Keep only combined MR and MCA for updated figure 
-  filter(mpa_definition == 'Marine Reserves & Conservation Areas')
+  filter(mpa_definition == 'Marine Reserves & Conservation Areas') %>% 
+  mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 site_mpa_plot <- ggplot(site_mpa_frequency) + 
   geom_col(aes(x=factor(site_frequency, levels = c('low', 'medium', 'high')), y=prop_category, fill=site_category)) + 
@@ -102,8 +108,8 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
                    labels = c("Low", "Medium", "High")) + 
   scale_y_continuous(expand = c(0,0),
                      limits = c(0,1)) + 
-  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
-                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  scale_fill_manual(values = pal,
+                    labels = c("Outside MPA", "In Buffer", "In MPA")) +
   labs(x="Site Frequency",
        y="Proportion of Dive Sites",
        fill = "Site Category") + 
@@ -111,11 +117,12 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
   #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
-        axis.title = element_text(size=10),
-        axis.text = element_text(size=7),
+        axis.title = element_text(size=8),
+        axis.text = element_text(size=8),
         legend.position = "bottom",
-        legend.title = element_text(size=9),
-        legend.text = element_text(size=9))  
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        text = element_text(family = 'sans'))  
 
 # B: Proportion of dives by MPA category and year   
 dives_mpa_frequency <- eco_sub %>% 
@@ -127,7 +134,8 @@ dives_mpa_frequency <- eco_sub %>%
   ungroup() %>% 
   mutate(prop_dives = n_dives / annual_dives) %>% 
   # Keep only combined MR and MCA for updated figure
-  filter(mpa_definition == 'Marine Reserves & Conservation Areas')
+  filter(mpa_definition == 'Marine Reserves & Conservation Areas') %>% 
+  mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 dive_mpa_plot <- ggplot(dives_mpa_frequency) + 
   geom_col(aes(x=year, y=prop_dives, fill=site_category)) +
@@ -135,8 +143,8 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
                      breaks = seq(2016,2022,2)) + 
   scale_y_continuous(expand = c(0,0),
                      limits = c(0,1)) + 
-  scale_fill_manual(values = c("#F4E7C5FF", "#979461FF", "#CD5733FF"),
-                    labels = c("In Buffer", "In MPA", "Outside MPA")) + 
+  scale_fill_manual(values = pal,
+                    labels = c("Outside MPA", "In Buffer", "In MPA")) + 
   labs(x="Year",
        y="Proportion of Dives",
        fill = "Site Category") + 
@@ -145,16 +153,22 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
         legend.position = 'bottom',
-        axis.title = element_text(size=10),
-        axis.text = element_text(size=7),
-        legend.title = element_text(size=9),
-        legend.text = element_text(size=9))
+        axis.title = element_text(size=8),
+        axis.text = element_text(size=8),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        text = element_text(family = 'sans'))
 
 # Combine and save 
 figure_2 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
   plot_layout(nrow=1, guides = 'collect') & theme(legend.position = 'bottom')
 
 save_plot(plot = figure_2,
-          filename = file.path(fig_path, "fig2.png"),
-          dpi = 600,
-          base_height = 4, base_width = 6)
+          filename = file.path(fig_path, "fig2.jpeg"),
+          dpi = 300,
+          base_height = 127, base_width = 190, units = "mm")
+
+save_plot(plot = figure_2,
+          filename = file.path(fig_path, "fig2.pdf"),
+          dpi = 300,
+          base_height = 127, base_width = 190, units = "mm")

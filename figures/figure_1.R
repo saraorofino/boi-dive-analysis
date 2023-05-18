@@ -47,7 +47,7 @@ harbors_north <- harbors %>%
   # Make labels two lines 
   mutate(harbor_lab = case_when(harbor == "Santa Barbara Harbor" ~ "Santa Barbara\nHarbor",
                                 harbor == "Ventura Harbor" ~ "Ventura\nHarbor",
-                                harbor == "Cuyler Harbor" ~ "Cuyler\nHarbor",
+                                #harbor == "Cuyler Harbor" ~ "Cuyler\nHarbor",
                                 harbor == "Prisoners Harbor" ~ "Prisoners\nHarbor",
                                 harbor == "Landing Cove" ~ "Landing\nCove",
                                 TRUE ~ harbor))
@@ -58,55 +58,63 @@ northern_mpas <- mpa_shp %>%
 
 # Map 
 ci_map <- ggplot() + 
-  geom_sf(data = ca_counties, fill = '#C9D2D3',
-          color = '#B4B4B4', size = 1) +
-  geom_sf(data = northern_ci, fill = '#C9D2D3',
-          color = '#B4B4B4', size = 1) +
+  geom_sf(data = ca_counties, fill = '#eeeeee',
+          color = '#bbbbbb', size = 2) +
+  geom_sf(data = northern_ci, fill = '#eeeeee',
+          color = NA) +
   geom_sf(data = ci_nms, aes(color=mpa_type),
-          fill = NA, key_glyph = 'polygon', size = 1.5) +
-  scale_color_manual(values = c('midnightblue'),
+          fill = NA, key_glyph = 'polygon', size = 2.5) +
+  scale_color_manual(values = c('#333333'),
+                     label = c("National Marine Sanctuary boundary"),
                      guide = guide_legend(order = 2),
                      name = "") +
-  geom_sf_text(data = northern_ci, aes(label = island), 
-               size=1, position = position_nudge(y = c(-0.005, 0, 0, -0.012),
-                                                 x = c(0, 0, 0, 0.01))) + 
   geom_sf_text(data = ca_counties, aes(label = map_lab),
-               size = 1, position = position_nudge(y = c(-0.27,0),
-                                                   x = c(0,0))) +
+               size = (7/.pt), position = position_nudge(y = c(-0.28,0),
+                                                   x = c(0.25,0))) +
   ggnewscale::new_scale_fill() + 
   ggnewscale::new_scale_color() + 
   geom_sf(data = mpa_types, aes(fill = mpa_type, color=mpa_type), 
-          alpha = 0.7, key_glyph = 'polygon') + 
-  scale_fill_manual(values = c('darkcyan', 'firebrick'),
+          alpha = 0.9, key_glyph = 'polygon') + 
+  scale_fill_manual(values = c('#555555', '#B4B4B4'),
                     guide = guide_legend(order = 1),
                     name = "MPA Type") +
-  scale_color_manual(values = c('darkcyan', 'firebrick'),
+  scale_color_manual(values = c('#555555', '#B4B4B4'),
                      guide = guide_legend(order = 1),
                      name = "MPA Type") + 
+  geom_sf_text(data = northern_ci, aes(label = island), 
+               size = (7/.pt), position = position_nudge(y = c(-0.042, 0, 0, -0.012),
+                                                         x = c(0.02, 0, 0, 0.01))) + 
   geom_point(data = harbors_north, aes(x=lon, y=lat),
-             size = 0.1, position = position_nudge(y = c(0,-0.01,0,0,0,
+             size = 1, position = position_nudge(y = c(0.005,-0.01,0,0.005,0,
                                                        -0.01,0.06),
-                                                 x = c(0,0.01,0.01,0,0,
+                                                 x = c(0,0.015,0.01,0,0,
                                                        0,-0.1))) +
   geom_text(data = harbors_north, aes(x=lon, y=lat, label=harbor_lab),
-            size = 1, position = position_nudge(y = c(0.02,-0.01,0.015,0.005,0,
-                                                       -0.028,0.042),
-                                                   x = c(0.02,0.06,0.04,0.037,0.035,
-                                                         0,-0.1))) +
+            size = (7/.pt), position = position_nudge(y = c(0.007,0.01,0.03,0.005,0.01,
+                                                       -0.039,0.033),
+                                                   x = c(0.09,0.08,0.03,0.055,0.04,
+                                                         0,-0.12))) +
   labs(x="",
        y="") + 
   theme_bw() + 
   theme(legend.margin=margin(0,0,0,0, unit="cm"),
         legend.position = 'bottom',
-        legend.title = element_text(size=5),
-        legend.text = element_text(size=5),
+        legend.direction = 'horizontal',
+        legend.title = element_text(size=7, family='sans'),
+        legend.text = element_text(size=7, family='sans'),
         axis.text = element_blank(),
         axis.ticks = element_blank(),
-        panel.grid = element_blank()) + 
+        panel.grid = element_blank(),
+        text = element_text(family = "sans")) + 
   coord_sf(ylim = c(33.79, 34.45),
            xlim = c(-120.65, -119.05))
 
 ggsave(plot = ci_map,
-       filename = file.path(fig_path, "fig1.png"),
-       dpi = 600,
-       height = 4, width = 6)
+       filename = file.path(fig_path, "fig1.jpeg"),
+       dpi = 300,
+       height = 127, width = 190, units = "mm")
+
+ggsave(plot = ci_map,
+       filename = file.path(fig_path, "fig1.pdf"),
+       dpi = 300,
+       height = 127, width = 190, units = "mm")
