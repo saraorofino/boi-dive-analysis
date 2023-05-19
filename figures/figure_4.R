@@ -1,13 +1,13 @@
 ##########
-# Figure 2 
-# Multipanel showing A) proportion of dive sites by MPA type in each frequency category;
-# B) proportion of high frequency dives by MPA classification in each MPA definition for ecotourism scenario
+# Figure 4 
+# Multipanel figure showing A) proportion of dive sites by MPA type in each frequency category;
+# B) proportion of high frequency dives by MPA classification in each MPA definition for lobster scenario
 ##########
 
 # Pacakges
 library(tidyverse)
 library(here)
-library(paletteer)
+library(DescTools)
 library(patchwork)
 library(cowplot)
 
@@ -17,13 +17,13 @@ source(file.path(here::here(),"common.R"))
 fig_path <- file.path(project_figure_path, "final")
 
 # Colors
-pal <- c("#F4E7C5FF", "#ACC2CFFF", "#678096FF")
+pal <- c("#E7D4AB", "#ACC2CFFF", "#678096FF")
 greypal <- DescTools::ColToGray(pal) #make sure colors are distinct in greyscale 
 
 # Data
-dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
+dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
 
-# Subset for ecotourism scenario 2: all dives except those during lobster season in October 
+# Subset for lobster scenario 3: dives during lobster season occuring at night or overnight 
 ## Define lobster season
 lobster_season <- data.frame(start_year = c(2016:2022),
                              start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
@@ -32,64 +32,81 @@ lobster_season <- data.frame(start_year = c(2016:2022),
                              end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
                                           '2020-03-18', '2021-03-17', '2022-03-16'))
 
-## Subset
-eco_sub <- dives %>% 
+## Subset 
+lobster_sub <- dives %>% 
+  filter(island_group == 'Northern') %>% 
   left_join(lobster_season %>% 
-              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>%
-  mutate(end_date = paste(year, "10", "31", sep = "-")) %>% 
-  # label which days to remove 
-  mutate(rm = case_when(year %in% c(2020, 2021, 2022) & date >= start_date & date <= end_date ~ "yes",
-                        year %in% c(2016,2017,2018,2019) & month == 10 ~ "yes",
-                        TRUE ~ "no")) %>% 
-  filter(rm == 'no') %>% 
-  dplyr::select(-start_date, -end_date, -rm)
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
+  # Keep January 1st to end date and start date through December 31
+  filter(date >= start_date | date <= end_date) %>% 
+  filter(time_of_day %in% c("night", "overnight"))
 
 # Results statistics for paper 
 ## Unique # of dives and dive sites
-unique_dives <- nrow(eco_sub)/2 #3014 unique dives (rows are duplicated for each of the 2 mpa definitions)
-unique_sites <- eco_sub %>% 
-  filter(mpa_definition != "Marine Reserve") %>% 
+unique_dives <- nrow(lobster_sub)/2 #346 unique dives (rows are duplicated for each of the 2 mpa definitions)
+unique_sites <- lobster_sub %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
   dplyr::select(site_id) %>% 
-  distinct() #807 unique sites 
+  distinct() #249 unique sites 
 
 ## Number of sites per frequency category 
-sites_per_frequency <- eco_sub %>% 
+sites_per_frequency <- lobster_sub %>% 
   dplyr::select(site_id, site_frequency) %>% 
   distinct() %>% 
   group_by(site_frequency) %>% 
-  count() # 219 high, 231 medium, 357 low 
+  count() # 79 high, 75 medium, 95 low 
 
-## Number of MPA sites per frequency category 
-mpa_sites <- eco_sub %>% 
-  filter(mpa_definition != "Marine Reserve") %>% 
+## Number of outside MPA sites per frequency category 
+outside_mpa_sites <- lobster_sub %>% 
+  filter(mpa_definition == "Marine Reserve") %>% 
   dplyr::select(site_id, site_frequency, site_category) %>% 
   distinct() %>% 
   group_by(site_frequency) %>% 
   mutate(total_sites = n()) %>% 
   ungroup() %>% 
-  filter(site_category == 'in_mpa') %>% 
+  filter(site_category == 'outside_mpa') %>% 
   group_by(site_frequency, total_sites) %>% 
-  summarize(sites_in_mpas = n()) %>% 
+  summarize(sites_outside_mpas = n()) %>% 
   ungroup() %>% 
-  mutate(frac_mpa = sites_in_mpas / total_sites)
+  mutate(frac_outside = sites_outside_mpas / total_sites)
 
-## Average number of dives by site category 
-avg_dives_category <- eco_sub %>% 
-  filter(mpa_definition != 'Marine Reserve') %>% 
+## High frequency sites in MPAs
+mpa_sites <- lobster_sub %>% 
+  filter(mpa_definition == "Marine Reserve" &
+           site_frequency == 'high') %>% 
+  dplyr::select(site_id, site_frequency, site_category) %>% 
+  distinct() %>% 
+  group_by(site_frequency) %>% 
+  mutate(total_sites = n()) %>% 
+  ungroup() %>% 
+  group_by(site_frequency, total_sites, site_category) %>% 
+  summarize(n_sites = n()) %>% 
+  ungroup() %>% 
+  mutate(frac_sites = n_sites / total_sites)
+
+## Average frequency of dives by site catgory 
+avg_dives_category <- lobster_sub %>% 
+  filter(mpa_definition == 'Marine Reserve') %>% 
   group_by(year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
-  group_by(year, annual_dives, site_category) %>% 
+  group_by(year, site_category, annual_dives) %>% 
   summarize(n_dives_category = n()) %>% 
   ungroup() %>% 
+  bind_rows(data.frame(year=c(2020, 2020),
+                       site_category=c('in_mpa', 'in_buffer'),
+                       annual_dives=c(17,17),
+                       n_dives_category=c(0,0))) %>% 
   mutate(frac_dives = n_dives_category / annual_dives) %>% 
   group_by(site_category) %>% 
-  summarize(avg_fraction = mean(frac_dives),
-            total_dives_category = sum(n_dives_category)) %>% 
+  summarize(n_dives = sum(n_dives_category),
+            avg_frac = mean(frac_dives)) %>% 
   ungroup()
 
 # A: Proportion of dive sites by frequency and MPA category
-site_mpa_frequency <- eco_sub %>% 
+site_mpa_frequency <- lobster_sub %>% 
   dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
   distinct() %>% 
   group_by(mpa_definition, site_frequency) %>% 
@@ -98,8 +115,8 @@ site_mpa_frequency <- eco_sub %>%
   group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency) %>% 
-  # Keep only combined MR and MCA for updated figure 
-  filter(mpa_definition == 'Marine Reserves & Conservation Areas') %>% 
+  # Keep only MR for updated figure 
+  filter(mpa_definition == "Marine Reserve") %>% 
   mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 site_mpa_plot <- ggplot(site_mpa_frequency) + 
@@ -109,7 +126,7 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
   scale_y_continuous(expand = c(0,0),
                      limits = c(0,1)) + 
   scale_fill_manual(values = pal,
-                    labels = c("Outside MPA", "In Buffer", "In MPA")) +
+                    labels = c("Outside MPA", "In Buffer", "In MPA")) + 
   labs(x="Site Frequency",
        y="Proportion of Dive Sites",
        fill = "Site Category") + 
@@ -119,13 +136,13 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
         panel.grid = element_blank(),
         axis.title = element_text(size=8),
         axis.text = element_text(size=8),
-        legend.position = "bottom",
+        legend.position = 'bottom',
         legend.title = element_text(size=8),
         legend.text = element_text(size=8),
         text = element_text(family = 'sans'))  
 
-# B: Proportion of dives by MPA category and year   
-dives_mpa_frequency <- eco_sub %>% 
+# B: proportion of dives by MPA category and year  
+dives_mpa_frequency <- lobster_sub %>% 
   group_by(mpa_definition, year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
@@ -133,8 +150,8 @@ dives_mpa_frequency <- eco_sub %>%
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / annual_dives) %>% 
-  # Keep only combined MR and MCA for updated figure
-  filter(mpa_definition == 'Marine Reserves & Conservation Areas') %>% 
+  # Keep only MR for updated figure 
+  filter(mpa_definition == 'Marine Reserve') %>% 
   mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 dive_mpa_plot <- ggplot(dives_mpa_frequency) + 
@@ -152,23 +169,23 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
   #facet_wrap(~mpa_definition) + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),
-        legend.position = 'bottom',
         axis.title = element_text(size=8),
         axis.text = element_text(size=8),
+        legend.position = 'bottom',
         legend.title = element_text(size=8),
         legend.text = element_text(size=8),
         text = element_text(family = 'sans'))
 
 # Combine and save 
-figure_2 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
+figure_4 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +
   plot_layout(nrow=1, guides = 'collect') & theme(legend.position = 'bottom')
 
-save_plot(plot = figure_2,
-          filename = file.path(fig_path, "fig2.jpeg"),
+save_plot(plot = figure_4,
+          filename = file.path(fig_path, "fig4.jpeg"),
           dpi = 300,
           base_height = 127, base_width = 190, units = "mm")
 
-save_plot(plot = figure_2,
-          filename = file.path(fig_path, "fig2.pdf"),
+save_plot(plot = figure_4,
+          filename = file.path(fig_path, "fig4.pdf"),
           dpi = 300,
           base_height = 127, base_width = 190, units = "mm")

@@ -47,8 +47,21 @@ frequency_plot <- ggplot(agg_site_visits) +
 dives_hist <- ggplot(agg_site_visits) + 
   geom_histogram(aes(x=n_dives), boundary=0, binwidth = 1) + 
   scale_x_continuous(expand=c(0,0),
-                     breaks = seq(1,125,2)) + 
+                     breaks = seq(1,125,5)) + 
   scale_y_continuous(expand=c(0,0)) + 
   labs(x="Number of Dives at Site",
        y="Number of Sites") + 
-  theme_bw()
+  theme_bw() + 
+  theme(strip.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        axis.title = element_text(size=8),
+        axis.text = element_text(size=7),
+        legend.title = element_text(size=8),
+        legend.text = element_text(size=8),
+        text = element_text(family = 'sans'))
+
+# Save
+ggsave(plot = dives_hist,
+       filename = file.path(fig_path, "figS1.jpeg"),
+       dpi = 300,
+       height = 127, width = 190, units = 'mm')

@@ -37,7 +37,18 @@ northern_ci <- ci_shp %>%
   filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa"))
 
 mpa_types <- mpa_shp %>% 
-  mutate(mpa_type = ifelse(str_detect(mpa_type, "Conservation"), "Marine Conservation Area", "Marine Reserve"))
+  mutate(mpa_type = ifelse(str_detect(mpa_type, "Conservation"), "Marine Conservation Area", "Marine Reserve")) %>% 
+  # Fix names so you can union State & Federal areas and remove lines
+  mutate(name = case_when(name == 'Footprint (Anacapa Channel)' ~ 'Footprint',
+                          name == 'Harris Point (San Miguel Island)' ~ 'Harris Point',
+                          name == 'Richardson Rock (San Miguel Island)' ~ 'Richardson Rock',
+                          name == 'Gull Island (Santa Cruz Island)' ~ 'Gull Island',
+                          name == 'Scorpion (Santa Cruz Island)' ~ 'Scorpion',
+                          name == 'South Point (Santa Rosa Island)' ~ 'South Point',
+                          TRUE ~ name)) %>% 
+  group_by(name, island, mpa_type) %>% 
+  summarize(geometry = st_union(geometry)) %>% 
+  ungroup()
 
 harbors_north <- harbors %>% 
   filter(island %in% c("San Miguel", "Santa Rosa", "Santa Cruz", "Anacapa") |
@@ -60,27 +71,27 @@ northern_mpas <- mpa_shp %>%
 ci_map <- ggplot() + 
   geom_sf(data = ca_counties, fill = '#eeeeee',
           color = '#bbbbbb', size = 2) +
-  geom_sf(data = northern_ci, fill = '#eeeeee',
-          color = NA) +
-  geom_sf(data = ci_nms, aes(color=mpa_type),
-          fill = NA, key_glyph = 'polygon', size = 2.5) +
-  scale_color_manual(values = c('#333333'),
-                     label = c("National Marine Sanctuary boundary"),
-                     guide = guide_legend(order = 2),
-                     name = "") +
   geom_sf_text(data = ca_counties, aes(label = map_lab),
                size = (7/.pt), position = position_nudge(y = c(-0.28,0),
                                                    x = c(0.25,0))) +
-  ggnewscale::new_scale_fill() + 
-  ggnewscale::new_scale_color() + 
-  geom_sf(data = mpa_types, aes(fill = mpa_type, color=mpa_type), 
-          alpha = 0.9, key_glyph = 'polygon') + 
+  geom_sf(data = mpa_types, aes(fill = mpa_type, color = mpa_type), 
+          key_glyph = 'polygon') + 
+  geom_sf(data = northern_ci, fill = '#eeeeee',
+          color = NA) +
   scale_fill_manual(values = c('#555555', '#B4B4B4'),
                     guide = guide_legend(order = 1),
                     name = "MPA Type") +
   scale_color_manual(values = c('#555555', '#B4B4B4'),
                      guide = guide_legend(order = 1),
                      name = "MPA Type") + 
+  ggnewscale::new_scale_fill() + 
+  ggnewscale::new_scale_color() + 
+  geom_sf(data = ci_nms, aes(color=mpa_type),
+          fill = NA, key_glyph = 'polygon', size = 2.5) +
+  scale_color_manual(values = c('#333333'),
+                     label = c("National Marine Sanctuary boundary"),
+                     guide = guide_legend(order = 2),
+                     name = "") +
   geom_sf_text(data = northern_ci, aes(label = island), 
                size = (7/.pt), position = position_nudge(y = c(-0.042, 0, 0, -0.012),
                                                          x = c(0.02, 0, 0, 0.01))) + 
