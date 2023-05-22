@@ -32,7 +32,7 @@ annual_dive_plot <- ggplot(annual_dives) +
                      limits = c(0,1200),
                      breaks = seq(0,1200,400)) + 
   labs(x="Year",
-       y="Number of Dives") + 
+       y="Number of Dive Events") + 
   theme_bw() + 
   theme(strip.background = element_rect(fill = "white"),
         panel.grid = element_blank(),

@@ -163,7 +163,7 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
   scale_fill_manual(values = pal,
                     labels = c("Outside MPA", "In Buffer", "In MPA")) + 
   labs(x="Year",
-       y="Proportion of Dives",
+       y="Proportion of Dive Events",
        fill = "Site Category") + 
   theme_bw() + 
   #facet_wrap(~mpa_definition) + 

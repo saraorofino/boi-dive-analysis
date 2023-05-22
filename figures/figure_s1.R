@@ -39,7 +39,7 @@ frequency_plot <- ggplot(agg_site_visits) +
   scale_x_discrete(expand=c(0,0),
                    labels = c("1 dive\n(Low frequency)", "2-3 dives\n(Medium frequency)", "4-125 dives\n(High frequency)")) + 
   scale_y_continuous(expand=c(0,0)) +
-  labs(x="Number of Dives at Site",
+  labs(x="Number of Dive Events at Site",
        y="Number of Sites") + 
   theme_bw()
 
@@ -49,7 +49,7 @@ dives_hist <- ggplot(agg_site_visits) +
   scale_x_continuous(expand=c(0,0),
                      breaks = seq(1,125,5)) + 
   scale_y_continuous(expand=c(0,0)) + 
-  labs(x="Number of Dives at Site",
+  labs(x="Number of Dive Events at Site",
        y="Number of Sites") + 
   theme_bw() + 
   theme(strip.background = element_rect(fill = "white"),
