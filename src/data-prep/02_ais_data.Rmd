@@ -25,7 +25,7 @@ library(bigrquery)
 library(DBI)
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 ```
 
 # Bounding Box 

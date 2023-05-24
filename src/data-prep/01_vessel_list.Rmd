@@ -23,7 +23,7 @@ library(readxl)
 library(sf)
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Raw vessel list
 all_vessels <- read_xlsx(path = file.path(project_data_path, "raw", "CAdiveboatlist_names.xlsx"),

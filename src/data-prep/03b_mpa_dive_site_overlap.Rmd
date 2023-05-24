@@ -21,7 +21,7 @@ library(lubridate)
 library(paletteer)
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Dive sites
 dive_sites <- read_csv(file.path(project_data_path, "processed", "dive_sites_1hr30min_1vessel_labeled.csv"))

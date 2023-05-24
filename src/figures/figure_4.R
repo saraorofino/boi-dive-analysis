@@ -11,7 +11,7 @@ library(DescTools)
 library(patchwork)
 library(cowplot)
 
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Final figures path 
 fig_path <- file.path(project_figure_path, "final")
@@ -21,46 +21,21 @@ pal <- c("#E7D4AB", "#ACC2CFFF", "#678096FF")
 greypal <- DescTools::ColToGray(pal) #make sure colors are distinct in greyscale 
 
 # Data
-dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
-
-# Subset for lobster scenario 3: dives during lobster season occuring at night or overnight 
-## Define lobster season
-lobster_season <- data.frame(start_year = c(2016:2022),
-                             start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
-                                            '2020-10-03', '2021-10-02', '2022-10-01'),
-                             end_year = c(2016:2022),
-                             end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
-                                          '2020-03-18', '2021-03-17', '2022-03-16'))
-
-## Subset 
-lobster_sub <- dives %>% 
-  filter(island_group == 'Northern') %>% 
-  left_join(lobster_season %>% 
-              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
-  left_join(lobster_season %>% 
-              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
-  # Keep January 1st to end date and start date through December 31
-  filter(date >= start_date | date <= end_date) %>% 
-  filter(time_of_day %in% c("night", "overnight"))
+dives <- read_csv(file.path(project_data_path, "output", "lobster_dive_events_mr.csv"))
 
 # Results statistics for paper 
 ## Unique # of dives and dive sites
-unique_dives <- nrow(lobster_sub)/2 #346 unique dives (rows are duplicated for each of the 2 mpa definitions)
-unique_sites <- lobster_sub %>% 
-  filter(mpa_definition == "Marine Reserve") %>% 
-  dplyr::select(site_id) %>% 
-  distinct() #249 unique sites 
+unique_sites <- length(unique(dives$site_id)) #249 unique sites 
 
 ## Number of sites per frequency category 
-sites_per_frequency <- lobster_sub %>% 
+sites_per_frequency <- dives %>% 
   dplyr::select(site_id, site_frequency) %>% 
   distinct() %>% 
   group_by(site_frequency) %>% 
   count() # 79 high, 75 medium, 95 low 
 
 ## Number of outside MPA sites per frequency category 
-outside_mpa_sites <- lobster_sub %>% 
-  filter(mpa_definition == "Marine Reserve") %>% 
+outside_mpa_sites <- dives %>% 
   dplyr::select(site_id, site_frequency, site_category) %>% 
   distinct() %>% 
   group_by(site_frequency) %>% 
@@ -73,9 +48,8 @@ outside_mpa_sites <- lobster_sub %>%
   mutate(frac_outside = sites_outside_mpas / total_sites)
 
 ## High frequency sites in MPAs
-mpa_sites <- lobster_sub %>% 
-  filter(mpa_definition == "Marine Reserve" &
-           site_frequency == 'high') %>% 
+mpa_sites <- dives %>% 
+  filter(site_frequency == 'high') %>% 
   dplyr::select(site_id, site_frequency, site_category) %>% 
   distinct() %>% 
   group_by(site_frequency) %>% 
@@ -87,8 +61,7 @@ mpa_sites <- lobster_sub %>%
   mutate(frac_sites = n_sites / total_sites)
 
 ## Average frequency of dives by site catgory 
-avg_dives_category <- lobster_sub %>% 
-  filter(mpa_definition == 'Marine Reserve') %>% 
+avg_dives_category <- dives %>%  
   group_by(year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
@@ -106,17 +79,15 @@ avg_dives_category <- lobster_sub %>%
   ungroup()
 
 # A: Proportion of dive sites by frequency and MPA category
-site_mpa_frequency <- lobster_sub %>% 
-  dplyr::select(mpa_definition, site_id, site_category, site_frequency) %>% 
+site_mpa_frequency <- dives %>% 
+  dplyr::select(site_id, site_category, site_frequency) %>% 
   distinct() %>% 
-  group_by(mpa_definition, site_frequency) %>% 
+  group_by(site_frequency) %>% 
   mutate(total_sites_in_frequency = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, site_frequency, site_category, total_sites_in_frequency) %>% 
+  group_by(site_frequency, site_category, total_sites_in_frequency) %>% 
   count() %>% 
   mutate(prop_category = n / total_sites_in_frequency) %>% 
-  # Keep only MR for updated figure 
-  filter(mpa_definition == "Marine Reserve") %>% 
   mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 site_mpa_plot <- ggplot(site_mpa_frequency) + 
@@ -133,16 +104,14 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
   plot_theme() 
 
 # B: proportion of dives by MPA category and year  
-dives_mpa_frequency <- lobster_sub %>% 
-  group_by(mpa_definition, year) %>% 
+dives_mpa_frequency <- dives %>%  
+  group_by(year) %>% 
   mutate(annual_dives = n()) %>% 
   ungroup() %>% 
-  group_by(mpa_definition, year, site_category, annual_dives) %>% 
+  group_by(year, site_category, annual_dives) %>% 
   summarize(n_dives = n()) %>% 
   ungroup() %>% 
   mutate(prop_dives = n_dives / annual_dives) %>% 
-  # Keep only MR for updated figure 
-  filter(mpa_definition == 'Marine Reserve') %>% 
   mutate(site_category = factor(site_category, levels = c("outside_mpa", "in_buffer", "in_mpa")))
 
 dive_mpa_plot <- ggplot(dives_mpa_frequency) + 

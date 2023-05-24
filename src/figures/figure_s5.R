@@ -7,7 +7,7 @@
 library(tidyverse)
 library(here)
 
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Final figures path 
 fig_path <- file.path(project_figure_path, "final")

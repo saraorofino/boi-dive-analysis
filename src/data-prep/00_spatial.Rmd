@@ -19,7 +19,7 @@ library(tigris)
 library(stringr)
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Load shp 
 ci_shp <- st_read(file.path(project_data_path, "raw", "data_EPSG_4326", "channel_islands.shp"))

@@ -21,7 +21,7 @@ library(hms)
 
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Vessel info
 vessel_info <- read_csv(file.path(project_data_path, "processed", "ais_vessel_list.csv"))
@@ -326,22 +326,95 @@ write_csv(all_ais_dives_1500, file.path(project_data_path, "processed", "ais-div
 ```
 
 
-## Subset Dives
+## Subset Scenarios
 
-For analysis we'll look at a subset of dives starting with only dives in the Northern Channel Islands, labeled as "day", where the vessel remained stationary in the dive site between 1.5 and 5 hours. This subset gives us 3,537 dives, or ~ 40% of the initial 8,747 AIS dives.  
+Ecotourism: dives in the northern Channel Islands, labeled as "day", where the vessel remained stationary in the dive site between 1.5 and 5 hours. This subset gives us 3,537 dives, or ~ 40% of the initial 8,747 AIS dives. We further investigate different subsets of this data for use in the habitat selection model in `src/exploratory-reports/ecotourism_html.Rmd`. 
 
 Around 56% of all AIS identified dives (4,890) are in the Northern Channel Islands. Of these 4,890 dives, 3,537 (or 72%) occurred during the day and have total time at the dive site between 1.5 and 5 hours.  
 
-```{r subset-dives}
+```{r subset-ecotourism-dives}
 north_dives_500 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "northern_ais_dives_2016_november_2022_500m.csv"))
 
 # Subset dives
-subset_dives <- north_dives_500 %>% 
+eco_dives <- north_dives_500 %>% 
   filter(time_of_day == 'day') %>% #3821 dives
   filter(total_hours <= 5) #3537 dives
 
 # Save 
-write_csv(subset_dives, file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
+write_csv(eco_dives, file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
 ```
 
+Lobster: dives in the northern Channel Islands during lobster season, with no limitations on time at dive site or time of day. We further explore additional subsets of this data in `src/exploratory-reports/lobster_html.Rmd` for use in the habitat selection model. 
+
+```{r subset-lobster-dives}
+all_dives_500 <- read_csv(file.path(project_data_path, "processed", "ais-dives", "all_ais_dives_2016_november_2022_500m.csv"))
+
+## Define lobster season
+lobster_season <- data.frame(start_year = c(2016:2022),
+                             start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
+                                            '2020-10-03', '2021-10-02', '2022-10-01'),
+                             end_year = c(2016:2022),
+                             end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
+                                          '2020-03-18', '2021-03-17', '2022-03-16'))
+
+## Subset 
+lobster_dives <- all_dives_500 %>% 
+  filter(island_group == 'Northern') %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(end_year, end_date), by = c('year' = 'end_year')) %>% 
+  # Keep January 1st to end date and start date through December 31
+  filter(date >= start_date | date <= end_date)
+
+# Save
+write_csv(lobster_dives, file.path(project_data_path, "processed", "ais-dives", "subset_north_lob_season_500m.csv"))
+```
+
+## Final Scenarios
+
+Based on the exploratory reports in `src/explotory-reports` we narrow down the dive event data to a single ecotourism scenario and a single lobster scenario which we will use in the habitat selection analysis.  
+
+Ecotourism: Time spent at dive sites is between 1.5 - 5 hours; the first AIS timestamp within the site is between 6 am - 6 pm, excluding any data from October during lobster season. We retain dive events where MPA is defined as both Marine Reserves and Marine Conservation Areas.    
+
+```{r final-ecotourism-dive-events}
+eco_dives <- read_csv(file.path(project_data_path, "processed", "ais-dives", "subset_north_max5hr_daytime_500m.csv"))
+
+# Define lobster season
+lobster_season <- data.frame(start_year = c(2016:2022),
+                             start_date = c('2016-10-01', '2017-09-30', '2018-09-29', '2019-09-28',
+                                            '2020-10-03', '2021-10-02', '2022-10-01'),
+                             end_year = c(2016:2022),
+                             end_date = c('2016-03-16', '2017-03-15', '2018-03-21', '2019-03-20', 
+                                          '2020-03-18', '2021-03-17', '2022-03-16'))
+
+# Create other subsets of data from scenario 1
+final_eco <- eco_dives %>% 
+  left_join(lobster_season %>% 
+              dplyr::select(start_year, start_date), by = c('year' = 'start_year')) %>%
+  mutate(end_date = paste(year, "10", "31", sep = "-")) %>% 
+  # label which days to remove 
+  mutate(rm = case_when(year %in% c(2020, 2021, 2022) & date >= start_date & date <= end_date ~ "yes",
+                        year %in% c(2016,2017,2018,2019) & month == 10 ~ "yes",
+                        TRUE ~ "no")) %>% 
+  filter(rm == 'no' & mpa_definition == 'Marine Reserves & Conservation Areas') %>% 
+  dplyr::select(-start_date, -end_date, -rm)
+
+# Save
+write_csv(final_eco, file.path(project_data_path, "output", "ecotourism_dive_events_mr_mcas.csv"))
+```
+
+Lobster: AIS dive event data for lobster season, roughly October to mid-March, where time of day is night or overnight (no maximum site time filters). We retain dive events where MPA is defined as Marine Reserves.      
+
+```{r final-lobster-dive-events}
+lobster_dive <- file.path(project_data_path, "processed", "ais-dives", "subset_north_lob_season_500m.csv")
+
+## Subset 
+final_lobster <- lobster_dives %>% 
+  filter(time_of_day %in% c("night", "overnight") &
+           mpa_definition == "Marine Reserve")
+
+# Save
+write_csv(final_lobster, file.path(project_data_path, "output", "lobster_dive_events_mr.csv"))
+```
 

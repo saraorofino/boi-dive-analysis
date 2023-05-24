@@ -21,7 +21,7 @@ library(colorspace)
 library(grDevices)
 
 # Load source
-source(file.path(here::here(),"common.R"))
+source(file.path(here::here(), "src", "common.R"))
 
 # Shapefiles
 ci_shp <- st_read(file.path(project_data_path, "processed", "spatial", "channel_islands.shp"))
