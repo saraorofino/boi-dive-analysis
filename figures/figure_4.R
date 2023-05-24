@@ -130,16 +130,7 @@ site_mpa_plot <- ggplot(site_mpa_frequency) +
   labs(x="Site Frequency",
        y="Proportion of Dive Sites",
        fill = "Site Category") + 
-  theme_bw() + 
-  #facet_wrap(~mpa_definition) + 
-  theme(strip.background = element_rect(fill = "white"),
-        panel.grid = element_blank(),
-        axis.title = element_text(size=8),
-        axis.text = element_text(size=8),
-        legend.position = 'bottom',
-        legend.title = element_text(size=8),
-        legend.text = element_text(size=8),
-        text = element_text(family = 'sans'))  
+  plot_theme() 
 
 # B: proportion of dives by MPA category and year  
 dives_mpa_frequency <- lobster_sub %>% 
@@ -165,16 +156,7 @@ dive_mpa_plot <- ggplot(dives_mpa_frequency) +
   labs(x="Year",
        y="Proportion of Dive Events",
        fill = "Site Category") + 
-  theme_bw() + 
-  #facet_wrap(~mpa_definition) + 
-  theme(strip.background = element_rect(fill = "white"),
-        panel.grid = element_blank(),
-        axis.title = element_text(size=8),
-        axis.text = element_text(size=8),
-        legend.position = 'bottom',
-        legend.title = element_text(size=8),
-        legend.text = element_text(size=8),
-        text = element_text(family = 'sans'))
+  plot_theme()
 
 # Combine and save 
 figure_4 <- site_mpa_plot + labs(tag='A') + dive_mpa_plot + labs(tag='B') +

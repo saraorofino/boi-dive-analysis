@@ -32,14 +32,7 @@ lobster_plot <- ggplot(lobster_clean) +
   scale_x_discrete(expand = c(0,0)) + 
   labs(x="Season",
        y="Reported Lobster Catch (count)") + 
-  theme_bw() + 
-  theme(strip.background = element_rect(fill = "white"),
-        panel.grid = element_blank(),
-        axis.title = element_text(size=8),
-        axis.text = element_text(size=8),
-        legend.title = element_text(size=8),
-        legend.text = element_text(size=8),
-        text = element_text(family = 'sans'))
+  plot_theme()
 
 # Save
 ggsave(plot = lobster_plot,

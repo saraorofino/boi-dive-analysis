@@ -107,16 +107,7 @@ ci_map <- ggplot() +
                                                          0,-0.12))) +
   labs(x="",
        y="") + 
-  theme_bw() + 
-  theme(legend.margin=margin(0,0,0,0, unit="cm"),
-        legend.position = 'bottom',
-        legend.direction = 'horizontal',
-        legend.title = element_text(size=7, family='sans'),
-        legend.text = element_text(size=7, family='sans'),
-        axis.text = element_blank(),
-        axis.ticks = element_blank(),
-        panel.grid = element_blank(),
-        text = element_text(family = "sans")) + 
+  map_theme() +
   coord_sf(ylim = c(33.79, 34.45),
            xlim = c(-120.65, -119.05))
 

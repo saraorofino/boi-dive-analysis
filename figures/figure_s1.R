@@ -51,14 +51,8 @@ dives_hist <- ggplot(agg_site_visits) +
   scale_y_continuous(expand=c(0,0)) + 
   labs(x="Number of Dive Events at Site",
        y="Number of Sites") + 
-  theme_bw() + 
-  theme(strip.background = element_rect(fill = "white"),
-        panel.grid = element_blank(),
-        axis.title = element_text(size=8),
-        axis.text = element_text(size=7),
-        legend.title = element_text(size=8),
-        legend.text = element_text(size=8),
-        text = element_text(family = 'sans'))
+  plot_theme() + 
+  theme(axis.text = element_text(size=7))
 
 # Save
 ggsave(plot = dives_hist,
