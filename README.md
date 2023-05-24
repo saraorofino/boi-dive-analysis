@@ -58,6 +58,7 @@ src
   |__ figures: scripts used to generate figures
     |__ figure_<x>.R: code to generate paper figure <x>; where x represents the manuscript figure number  
     |__ figure_s<x>.R: code to generate supplemental figure <x>; where x represents the manuscript figure number  
+  |__ common.R: file paths and plot themes used in the analysis 
 
 * Uses data that requires authorization     
 ```
