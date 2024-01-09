@@ -1,6 +1,6 @@
 # Description 
 
-This repository includes code to generate AIS inferred dive events and figures in the manuscript Morse *et al.* (in prep): "Preferential selection of marine protected areas by the recreational scuba diving industry"  
+This repository contains code to generate AIS inferred dive events and associated figures used in the paper: Morse, M., McCauley, D., Orofino, S., Stears, K., Mladjov, S., Caselle, J., Clavelle, T., & Freedman, R. (2024). Preferential selection of marine protected areas by the recreational scuba diving industry. Marine Policy, 159. [https://doi.org/10.3389/fmars.2022.1062447](https://doi.org/10.1016/j.marpol.2023.105908)
 
 # Overview
 
@@ -19,11 +19,10 @@ The repository uses the following basic structure:
 boi-dive-analysis
   |__ src
     |__ data-prep 
-    |__ exploratory-reports
     |__ figures
 ```
 
-The `src` folder includes all the relevant code. The `data-prep` folder contains all the code to process the raw input data and creates the final files that are required to run the analysis. The `exploratory-reports` folder contains html and PDF version of exploratory data analysis on dive events. The `src/figures` folder contains all the code to generate manuscript figures. 
+The `src` folder includes all the relevant code. The `data-prep` folder contains all the code to process the raw input data and creates the final files that are required to run the analysis. The `src/figures` folder contains all the code to generate manuscript figures. 
 
 A detailed accounting of all scripts in the repository with a brief description of their objectives is described below in `Repository Details`.  
 
@@ -34,8 +33,7 @@ A detailed accounting of all scripts in the repository with a brief description 
 All of the relevant code is contained in the `src` folder. The order of running scripts should be as follows: 
 
   - The scripts required to process and prepare all data used in the analysis can be found in the `src/data-prep` folder. Each stage of data processing is contained in a folder and should be in run in numeric order from `00_spatial` to `04_dive_events`. 
-  - Scripts used to generate html and pdf reports are in `src/exploratory-reports` and should be run after the data prep. Scripts can be run in any order.      
-  - Additional scripts to create paper figures are in `src/figures`, and should be run after the data prep. Figure scripts can be run in any order and are labeled according to their order in the manuscript.    
+  - Scripts to create paper figures are in `src/figures`, and should be run after the data prep. Figure scripts can be run in any order and are labeled according to their order in the manuscript.    
 
 [Back to Top](#description)
 
@@ -52,13 +50,10 @@ src
     |__ 03a_dive_sites.Rmd*: identifies possible dive sites from the AIS data   
     |__ 03b_mpa_dive_site_overlap.Rmd: assigns possible dive sites to MPA categories (outside, in buffer, in MPA) for different buffer distances and MPA definitions   
     |__ 04_dive_events.Rmd: identifies dive events from the AIS data, creates final subsets of dives used in resource selection model   
-  |__ exploratory-reports: exploratory data analysis reports generated for collaborators
-    |__ ecotourism_<x>.Rmd: code to generate a report visualizing the ecotourism dive scenarios where <x> refers to the output form, either pdf or html  
-    |__ lobster_<x>.Rmd: code to generate a report visualizing the lobster dive scenarios where <x> refers to the output form, either pdf or html   
   |__ figures: scripts used to generate figures
     |__ figure_<x>.R: code to generate paper figure <x>; where x represents the manuscript figure number  
     |__ figure_s<x>.R: code to generate supplemental figure <x>; where x represents the manuscript figure number  
-  |__ common.R: file paths and plot themes used in the analysis 
+  |__ common.R: file paths for data, plot themes for manuscript figures
 
 * Uses data that requires authorization     
 ```
