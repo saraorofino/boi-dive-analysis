@@ -4,4 +4,4 @@
 .Ruserdata
 .DS_Store
 */.DS_Store
-data-prep/*_pdf.Rmd
+exploratory-reports/*
